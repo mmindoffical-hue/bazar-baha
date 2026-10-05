@@ -5,12 +5,12 @@
 
 ## 1. Proje nedir?
 Türkmenistan'daki market, mağaza ve bazar satıcılarının ürün fiyatlarını
-**fiyat + o anki kısa video** ile güncellediği, alıcıların ise "bir ürün nerede
+**fiyat + ürün fotoğrafları** ile güncellediği, alıcıların ise "bir ürün nerede
 en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
 
-- **Alıcı:** ürün arar, mağazaları fiyata göre sıralı görür, videoyu izler,
+- **Alıcı:** ürün arar, mağazaları fiyata göre sıralı görür, ürün fotoğraflarına bakar,
   alışveriş listesi yapar, yanlış fiyatı bildirir.
-- **Dükkân sahibi:** başvuru yapar, admin onaylayınca ürün fiyatı + video girer.
+- **Dükkân sahibi:** başvuru yapar, admin onaylayınca ürün fiyatı + fotoğraf girer.
 - **Admin (proje sahibi):** dükkân başvurularını onaylar/askıya alır, ürün
   kataloğunu yönetir, şikâyetleri görür.
 
@@ -33,15 +33,14 @@ en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
    dil dosyasından gelir (sonra Rusça/Türkçe eklemek kolay olsun).
 4. **Dış kaynak yok:** Google Fonts, CDN script vb. kullanma. Font ve
    kütüphaneler projeyle birlikte paketlenir.
-5. **Yavaş internet için tasarla:** küçük dosya, liste ekranında video yerine
-   küçük kare, video sadece tıklanınca yüklenir, son veriler önbellekte
+5. **Yavaş internet için tasarla:** küçük dosya, listede küçük fotoğraf kopyası,
+  tam boy fotoğraf sadece tıklanınca yüklenir, son veriler önbellekte
    tutulur (internet kopsa da eski fiyatlar "eski bilgi" etiketiyle görünür).
 6. **Eski bilgi etiketi:** `updated_at` 24 saatten eskiyse gri + "Köne maglumat".
-7. **Video kuralı:** uygulama içi kamera (`getUserMedia` + `MediaRecorder`),
-   5-10 saniye, düşük çözünürlük (~480p), yaklaşık 1-3 MB. Galeriden seçme yok.
-   Her ürün için tek güncel video; yenisi gelince eskisi silinir.
-8. **Realtime:** her ekran sadece gördüğü ürünü dinler (`prices` tablosu,
-   `product_id` filtresi). Tüm tabloyu dinleme.
+7. **Fotoğraf kuralı:** ürün başına 1-2 HD fotoğraf. Yüklemeden önce tarayıcıda
+  1280px'e küçültülür, JPEG 0.8 kalite kullanılır ve 320px küçük kopyası
+  oluşturulur. Telefon kamerası için `capture="environment"` kullanılır.
+8. **Realtime:** atlandı. Ürün sayfası verisi yalnızca "Täzele" düğmesiyle yenilenir.
 9. Fiyat para birimi: **manat**, 2 ondalık.
 10. Mobil öncelikli (360px genişlik), büyük dokunma alanları.
 
@@ -51,11 +50,11 @@ en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
   **status: pending | approved | suspended**) - status sadece admin RPC'si
   `set_store_status` ile değişir
 - `categories`, `products` (katalog, sadece admin yazar)
-- `prices` (store_id, product_id, price, in_stock, video_path, updated_at)
+- `prices` (store_id, product_id, price, in_stock, photo_paths, video_path, updated_at)
   - her dükkân ürün başına tek satır; `updated_at` sunucuda otomatik yazılır
 - `reports` (yanlış fiyat bildirimi)
 - `price_list` görünümü: alıcı ekranı için birleşik liste
-- Storage: `store-videos` (herkese açık), `store-photos` (özel)
+- Storage: `product-photos` (herkese açık), `store-videos` (eski, kullanılmıyor), `store-photos` (özel)
   - Video yolu: `{store_id}/{product_id}-{zaman}.mp4`
   - Foto yolu: `{user_id}/vitrin.jpg`
 
@@ -63,7 +62,7 @@ en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
 1. Kayıt = başvuru, durum `pending`. Bu durumda fiyat/video yazamaz.
 2. Admin telefon + adres + vitrin fotoğrafı ile doğrular, onaylar.
 3. Sadece `approved` dükkân fiyat yazar (RLS + storage politikası).
-4. Videoya uygulama içi kamera; saat sunucudan yazılır.
+4. Ürün fotoğrafları kamera veya galeriden tek tek seçilir, tarayıcıda küçültülür.
 5. Kullanıcı "yanlış fiyat" bildirir; çok bildirim alan dükkân askıya alınır.
 > Not: Uygulama içi kamera zorunluluğu tarayıcı tarafında bir engeldir, %100
 > kanıt değildir. Asıl güvenlik admin onayı + bildirim sistemidir.
@@ -129,16 +128,16 @@ yapay zekâya yapıştır.
 > "Onaylı dükkân için 'Ürünlerim' sayfası: katalogdan ürün seç, fiyat ve
 > stokta var/yok gir, prices tablosuna upsert (store_id, product_id)."
 
-## Adım 7 - Video çekme ve yükleme
-> "Uygulama içi kamera ile 5-10 sn video kaydet (MediaRecorder, düşük
-> bitrate, ~480p, en fazla 3 MB). store-videos/{store_id}/{product_id}-{zaman}.mp4
-> yoluna yükle, prices.video_path güncelle, eski videoyu sil. Galeriden
-> seçme olmasın. İlerleme çubuğu göster."
+## Adım 7 - Fotoğraf seçme ve yükleme
+> "Her ürün için 1-2 fotoğraf al. `input type=file` ile fotoğrafları tek tek
+> seç; telefonda kamerayı açmak için `capture=environment` kullan. Yüklemeden
+> önce tarayıcıda EXIF yönünü koruyarak 1280px'e küçült, JPEG kalite 0.8
+> kullan, gerekirse 0.7/0.6 dene. 320px küçük kopya oluştur. Tam ve küçük
+> kopyayı `product-photos` içine yükle; `prices.photo_paths` alanına tam boy
+> yolları yaz. Fotoğraf ekleme/silme ve ilerleme göstergesi olsun."
 
-## Adım 8 - Realtime
-> "Ürün sayfasında supabase realtime ile prices tablosundaki değişiklikleri
-> product_id filtresiyle dinle; fiyat değişince satır canlı güncellensin.
-> Sayfadan çıkınca aboneliği kapat."
+## Adım 8 - Realtime (atlandı)
+> "Realtime eklenmedi. Ürün sayfasında 'Täzele' düğmesiyle veriyi elle yenile."
 
 ## Adım 9 - Alışveriş listesi + yanlış fiyat bildirimi
 > "Alışveriş listesi (telefonda localStorage, girişte isteğe bağlı), her
@@ -151,7 +150,7 @@ yapay zekâya yapıştır.
 
 ## Adım 11 - Çevrimdışı / yavaş internet
 > "PWA önbelleği: uygulama dosyaları ve son yüklenen fiyat listesi çevrimdışı
-> da görünsün. Resim ve video tembel yüklensin."
+> da görünsün. Fotoğraflar tembel yüklensin."
 
 ## Adım 12 - Yayına alma
 - [ ] Kodu GitHub'a yükle.
@@ -167,10 +166,9 @@ yapay zekâya yapıştır.
 
 ## Bilinen sınırlar (V1'de dikkat)
 - **Supabase ücretsiz depolama küçüktür** (yaklaşık 1 GB, güncel sınırı
-  kontrol et). 1-3 MB'lık videolarla pilot için yeter. Büyürsen videoları
-  Cloudflare R2'ye taşıma adımını ekleriz.
+  kontrol et). Fotoğraflar yüklenmeden önce tarayıcıda küçültülür.
 - Ücretsiz projeler uzun süre kullanılmazsa duraklatılabilir.
-- Realtime bağlantı sayısı sınırlıdır; bu yüzden sadece açık ekran dinlenir.
+- Realtime bu sürümde kullanılmaz.
 - Kotalar değişir: kullanmadan önce Supabase ve Cloudflare fiyat sayfalarına bak.
 - Türkmenistan'daki yerel kurallar (ticari veri yayını, kişisel veri) için
   yerel bir uzmana danışmanı öneririm.

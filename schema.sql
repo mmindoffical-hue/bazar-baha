@@ -52,6 +52,7 @@ create table public.prices (
   product_id uuid not null references public.products(id) on delete cascade,
   price      numeric(10,2) not null check (price > 0 and price < 1000000),  -- manat
   in_stock   boolean not null default true,
+  photo_paths text[] not null default '{}',
   video_path text,                                    -- store-videos icindeki yol
   updated_at timestamptz not null default now(),
   unique (store_id, product_id)
@@ -155,6 +156,8 @@ grant insert, update, delete on public.categories, public.products to authentica
 grant select on public.prices to anon, authenticated;
 grant insert (store_id, product_id, price, in_stock, video_path) on public.prices to authenticated;
 grant update (price, in_stock, video_path) on public.prices to authenticated;
+grant insert (photo_paths) on public.prices to authenticated;
+grant update (photo_paths) on public.prices to authenticated;
 grant delete on public.prices to authenticated;
 
 -- reports
@@ -225,7 +228,7 @@ create view public.price_list with (security_invoker = true) as
 select pr.id         as price_id,
        pr.price,
        pr.in_stock,
-       pr.video_path,
+      pr.photo_paths,
        pr.updated_at,
        s.id          as store_id,
        s.name        as store_name,
@@ -241,17 +244,16 @@ join public.stores   s on s.id = pr.store_id
 join public.products p on p.id = pr.product_id;
 grant select on public.price_list to anon, authenticated;
 
--- 7. REALTIME ------------------------------------------------------------
-alter publication supabase_realtime add table public.prices;
-
--- 8. DEPOLAMA (STORAGE) --------------------------------------------------
+-- 7. DEPOLAMA (STORAGE) --------------------------------------------------
 -- Video yolu: {store_id}/{product_id}-{zaman}.mp4   (max ~3 MB)
 -- Foto yolu : {user_id}/vitrin.jpg                  (ozel, sadece sahibi + admin gorur)
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values
   ('store-videos', 'store-videos', true,  3145728,
      array['video/mp4', 'video/webm', 'video/quicktime']),
   ('store-photos', 'store-photos', false, 2097152,
-     array['image/jpeg', 'image/png', 'image/webp'])
+      array['image/jpeg', 'image/png', 'image/webp']),
+    ('product-photos', 'product-photos', true, 512000,
+      array['image/jpeg'])
 on conflict (id) do nothing;
 
 create policy "videos: herkes gorur" on storage.objects
@@ -282,7 +284,18 @@ create policy "photos: sahibi siler" on storage.objects
   using (bucket_id = 'store-photos'
          and (storage.foldername(name))[1] = (select auth.uid())::text);
 
--- 9. BASLANGIC VERISI (admin sonra degistirebilir) -----------------------
+create policy "product photos: herkes gorur" on storage.objects
+  for select to anon, authenticated using (bucket_id = 'product-photos');
+create policy "product photos: onayli dukkan yukler" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'product-photos'
+              and public.owns_approved_store(((storage.foldername(name))[1])::uuid));
+create policy "product photos: onayli dukkan siler" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'product-photos'
+         and public.owns_approved_store(((storage.foldername(name))[1])::uuid));
+
+-- 8. BASLANGIC VERISI (admin sonra degistirebilir) -----------------------
 insert into public.categories (slug, name_tk) values
   ('vegetables', 'Gök önümler'),
   ('fruits',     'Miweler'),

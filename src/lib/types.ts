@@ -4,7 +4,7 @@ export type PriceListing = {
   price_id: string
   price: number
   in_stock: boolean
-  video_path: string | null
+  photo_paths: string[]
   updated_at: string
   store_name: string
   product_id: string
@@ -39,6 +39,6 @@ export type StorePrice = {
   product_id: string
   price: number | string
   in_stock: boolean
-  video_path: string | null
+  photo_paths: string[]
   updated_at: string
 }

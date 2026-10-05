@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { tk } from '../i18n/tk'
 import { isValidPrice, normalizePrice } from '../lib/formatting'
 import type { Category, StorePrice, StoreProduct } from '../lib/types'
 import { supabase } from '../lib/supabase'
-import { StoreVideoCapture } from './StoreVideoCapture'
+import { compressProductPhoto, removeProductPhotos, thumbnailPathFor } from '../lib/productPhotos'
 
 export function StorePriceManager({ storeId }: { storeId: string }) {
   const [categories, setCategories] = useState<Category[]>([])
@@ -20,7 +20,10 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
   const [inStock, setInStock] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [videoPriceId, setVideoPriceId] = useState('')
+  const [selectedPhotos, setSelectedPhotos] = useState<File[]>([])
+  const [photoBusyId, setPhotoBusyId] = useState('')
+  const savingRef = useRef(false)
+  const photoActionRef = useRef(false)
 
   const loadData = async () => {
     if (!supabase) {
@@ -32,7 +35,7 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
     const [categoryResult, productResult, priceResult] = await Promise.all([
       supabase.from('categories').select('id, name_tk').order('name_tk'),
       supabase.from('products').select('id, category_id, name_tk, unit').order('name_tk'),
-      supabase.from('prices').select('id, product_id, price, in_stock, video_path, updated_at')
+      supabase.from('prices').select('id, product_id, price, in_stock, photo_paths, updated_at')
         .eq('store_id', storeId).order('updated_at', { ascending: false }),
     ])
     if (categoryResult.error || productResult.error || priceResult.error) {
@@ -57,6 +60,7 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
     setProductId('')
     setPriceValue('')
     setInStock(true)
+    setSelectedPhotos([])
     setError('')
   }
 
@@ -74,6 +78,7 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
 
   const savePrice = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (savingRef.current) return
     setError('')
     setNotice('')
     const normalizedPrice = normalizePrice(priceValue)
@@ -81,38 +86,135 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
       setError(tk.storePrices.invalidPrice)
       return
     }
+    if (!editingId && selectedPhotos.length === 0) {
+      setError(tk.storePrices.photoRequired)
+      return
+    }
     if (!supabase || !productId) {
       setError(tk.storePrices.saveError)
       return
     }
 
+    savingRef.current = true
     setSaving(true)
+    const uploadedPaths: string[] = []
+    let saved = false
+    let uploadingPhotos = false
     try {
       const { data: existingPrice, error: lookupError } = await supabase
         .from('prices')
-        .select('id')
+        .select('id, photo_paths')
         .eq('store_id', storeId)
         .eq('product_id', productId)
         .maybeSingle()
       if (lookupError) throw lookupError
 
-      const result = existingPrice
-        ? await supabase.from('prices').update({ price: Number(normalizedPrice), in_stock: inStock }).eq('id', existingPrice.id)
-        : await supabase.from('prices').insert({
+      if (existingPrice) {
+        const currentPaths = existingPrice.photo_paths ?? []
+        if (currentPaths.length + selectedPhotos.length > 2) throw new Error('Too many product photos')
+        const result = await supabase.from('prices').update({ price: Number(normalizedPrice), in_stock: inStock }).eq('id', existingPrice.id)
+        if (result.error) throw result.error
+        uploadingPhotos = selectedPhotos.length > 0
+        for (const [index, file] of selectedPhotos.entries()) {
+          uploadedPaths.push(await uploadPhoto(file, productId, currentPaths.length + index + 1))
+        }
+        uploadingPhotos = false
+        if (uploadedPaths.length) {
+          const { error: photoUpdateError } = await supabase.from('prices')
+            .update({ photo_paths: [...currentPaths, ...uploadedPaths] }).eq('id', existingPrice.id)
+          if (photoUpdateError) throw photoUpdateError
+        }
+      } else {
+        uploadingPhotos = true
+        for (const [index, file] of selectedPhotos.entries()) {
+          uploadedPaths.push(await uploadPhoto(file, productId, index + 1))
+        }
+        uploadingPhotos = false
+        const result = await supabase.from('prices').insert({
           store_id: storeId,
           product_id: productId,
           price: Number(normalizedPrice),
           in_stock: inStock,
+          photo_paths: uploadedPaths,
         })
-      if (result.error) throw result.error
+        if (result.error) throw result.error
+      }
 
+      saved = true
       setNotice(tk.storePrices.saved)
       resetForm()
       await loadData()
     } catch {
-      setError(tk.storePrices.saveError)
+      if (!saved) await removeProductPhotos(uploadedPaths)
+      setError(uploadingPhotos ? tk.storePrices.photoUploadError : tk.storePrices.saveError)
     } finally {
+      savingRef.current = false
       setSaving(false)
+    }
+  }
+
+  const uploadPhoto = async (file: File, productId: string, index: number): Promise<string> => {
+    if (!supabase) throw new Error('Supabase is unavailable')
+    const compressed = await compressProductPhoto(file)
+    const path = `${storeId}/${productId}-${Date.now()}-${index}.jpg`
+    const { error: fullError } = await supabase.storage.from('product-photos').upload(path, compressed.full, {
+      contentType: 'image/jpeg',
+      upsert: false,
+    })
+    if (fullError) throw fullError
+    const { error: thumbnailError } = await supabase.storage.from('product-photos').upload(
+      thumbnailPathFor(path), compressed.thumbnail, { contentType: 'image/jpeg', upsert: false },
+    )
+    if (thumbnailError) {
+      await removeProductPhotos([path])
+      throw thumbnailError
+    }
+    return path
+  }
+
+  const addPhoto = async (price: StorePrice, file: File) => {
+    if (!supabase || photoActionRef.current) return
+    const currentPaths = price.photo_paths ?? []
+    if (currentPaths.length >= 2) return
+    photoActionRef.current = true
+    setPhotoBusyId(price.id)
+    setError('')
+    let uploadedPath = ''
+    try {
+      uploadedPath = await uploadPhoto(file, price.product_id, currentPaths.length + 1)
+      const nextPaths = [...currentPaths, uploadedPath]
+      const { error: updateError } = await supabase.from('prices')
+        .update({ photo_paths: nextPaths }).eq('id', price.id)
+      if (updateError) throw updateError
+      setPrices((current) => current.map((item) => item.id === price.id ? { ...item, photo_paths: nextPaths } : item))
+    } catch {
+      if (uploadedPath) await removeProductPhotos([uploadedPath])
+      setError(tk.storePrices.photoUploadError)
+    } finally {
+      photoActionRef.current = false
+      setPhotoBusyId('')
+    }
+  }
+
+  const deletePhoto = async (price: StorePrice, photoIndex: number) => {
+    if (!supabase || photoActionRef.current) return
+    const currentPaths = price.photo_paths ?? []
+    if (currentPaths.length <= 1) return
+    photoActionRef.current = true
+    setPhotoBusyId(price.id)
+    setError('')
+    const nextPaths = currentPaths.filter((_, index) => index !== photoIndex)
+    try {
+      const { error: updateError } = await supabase.from('prices')
+        .update({ photo_paths: nextPaths }).eq('id', price.id)
+      if (updateError) throw updateError
+      setPrices((current) => current.map((item) => item.id === price.id ? { ...item, photo_paths: nextPaths } : item))
+      await removeProductPhotos([currentPaths[photoIndex]])
+    } catch {
+      setError(tk.storePrices.photoDeleteError)
+    } finally {
+      photoActionRef.current = false
+      setPhotoBusyId('')
     }
   }
 
@@ -127,10 +229,7 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
       setError(tk.storePrices.deleteError)
       return
     }
-    if (price.video_path) {
-      const { error: videoDeleteError } = await supabase.storage.from('store-videos').remove([price.video_path])
-      if (videoDeleteError) console.warn('Deleted product video could not be removed.', videoDeleteError)
-    }
+    await removeProductPhotos(price.photo_paths ?? [])
     setPrices((current) => current.filter((item) => item.id !== price.id))
     setNotice(tk.storePrices.deleted)
     if (editingId === price.id) resetForm()
@@ -162,23 +261,44 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
                         <p className="mt-1 text-xs text-stone-500">
                           {tk.buyer.updated}: {new Date(price.updated_at).toLocaleString('tk-TM')}
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => setVideoPriceId((current) => current === price.id ? '' : price.id)}
-                          className="mt-2 min-h-10 rounded-md border border-emerald-800 px-3 text-sm font-semibold text-emerald-900"
-                        >
-                          {tk.storePrices.recordVideo}
-                        </button>
-                        {videoPriceId === price.id && (
-                          <StoreVideoCapture
-                            storeId={storeId}
-                            productId={price.product_id}
-                            currentVideoPath={price.video_path}
-                            onUploaded={(videoPath) => setPrices((current) => current.map((item) => (
-                              item.id === price.id ? { ...item, video_path: videoPath } : item
-                            )))}
-                            onClose={() => setVideoPriceId('')}
-                          />
+                        <div className="mt-3 flex flex-wrap items-start gap-2">
+                          {(price.photo_paths ?? []).map((path, index) => {
+                            const thumbnail = supabase?.storage.from('product-photos').getPublicUrl(thumbnailPathFor(path)).data.publicUrl
+                            return (
+                              <div key={path} className="relative h-14 w-14 overflow-hidden rounded bg-stone-200">
+                                {thumbnail && <img src={thumbnail} alt={tk.storePrices.productPhoto} className="h-full w-full object-cover" />}
+                                <button
+                                  type="button"
+                                  disabled={(price.photo_paths ?? []).length <= 1 || photoBusyId !== ''}
+                                  onClick={() => void deletePhoto(price, index)}
+                                  aria-label={tk.storePrices.deletePhoto}
+                                  className="absolute inset-x-0 bottom-0 bg-black/65 py-1 text-[10px] font-semibold text-white disabled:opacity-45"
+                                >
+                                  {tk.storePrices.deletePhoto}
+                                </button>
+                              </div>
+                            )
+                          })}
+                          {(price.photo_paths ?? []).length < 2 && (
+                            <label className="flex min-h-14 cursor-pointer items-center rounded border border-dashed border-stone-400 px-2 text-xs font-semibold text-emerald-900">
+                              {photoBusyId === price.id ? tk.storePrices.uploadingPhoto : tk.storePrices.addPhoto}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                disabled={photoBusyId !== '' || saving}
+                                onChange={(event) => {
+                                  const file = event.currentTarget.files?.[0]
+                                  event.currentTarget.value = ''
+                                  if (file) void addPhoto(price, file)
+                                }}
+                                className="sr-only"
+                              />
+                            </label>
+                          )}
+                        </div>
+                        {photoBusyId === price.id && (
+                          <progress aria-label={tk.storePrices.uploadingPhoto} className="mt-2 h-2 w-full" />
                         )}
                       </div>
                       <div className="flex shrink-0 gap-2">
@@ -242,6 +362,35 @@ export function StorePriceManager({ storeId }: { storeId: string }) {
                   <option value="no">{tk.storePrices.outOfStock}</option>
                 </select>
               </label>
+              {!editingId && (
+                <div className="space-y-2 text-sm font-medium text-stone-700">
+                  <span className="block">{tk.storePrices.photos} ({selectedPhotos.length}/2)</span>
+                  <label className="inline-flex min-h-11 cursor-pointer items-center rounded-md border border-emerald-800 px-3 text-sm font-semibold text-emerald-900">
+                    {tk.storePrices.addPhoto}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      disabled={saving || selectedPhotos.length >= 2}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0]
+                        event.currentTarget.value = ''
+                        if (file) setSelectedPhotos((current) => current.length < 2 ? [...current, file] : current)
+                      }}
+                      className="sr-only"
+                    />
+                  </label>
+                  {selectedPhotos.map((photo, index) => (
+                    <div key={`${photo.name}-${index}`} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="min-w-0 truncate">{photo.name}</span>
+                      <button type="button" disabled={saving} onClick={() => setSelectedPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="min-h-8 px-2 text-red-800 disabled:opacity-50">
+                        {tk.storePrices.removePhoto}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {saving && selectedPhotos.length > 0 && <div className="space-y-1"><p className="text-sm text-stone-600">{tk.storePrices.uploadingPhoto}</p><progress aria-label={tk.storePrices.uploadingPhoto} className="h-2 w-full" /></div>}
               {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
               <div className="flex gap-3">
                 <button type="submit" disabled={saving} className="min-h-11 rounded-md bg-emerald-800 px-4 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">

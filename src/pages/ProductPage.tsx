@@ -9,6 +9,7 @@ export function ProductPage({ product }: { product: Product }) {
   const [priceListings, setPriceListings] = useState<PriceListing[]>([])
   const [pricesLoading, setPricesLoading] = useState(false)
   const [pricesError, setPricesError] = useState(false)
+  const [refreshCount, setRefreshCount] = useState(0)
 
   useEffect(() => {
     if (!supabase) {
@@ -22,7 +23,7 @@ export function ProductPage({ product }: { product: Product }) {
     setPricesError(false)
     void supabase
       .from('price_list')
-      .select('price_id, price, in_stock, video_path, updated_at, store_name, product_id, product_name, unit')
+      .select('price_id, price, in_stock, photo_paths, updated_at, store_name, product_id, product_name, unit')
       .eq('product_id', product.id)
       .order('price', { ascending: true })
       .then(({ data, error: requestError }) => {
@@ -33,10 +34,18 @@ export function ProductPage({ product }: { product: Product }) {
       })
 
     return () => { mounted = false }
-  }, [product])
+  }, [product.id, refreshCount])
 
   return (
     <section aria-label={product.name_tk} className="mt-5 space-y-3">
+      <button
+        type="button"
+        onClick={() => setRefreshCount((current) => current + 1)}
+        disabled={pricesLoading}
+        className="min-h-8 text-xs font-semibold text-emerald-900 disabled:opacity-50"
+      >
+        {tk.buyer.refresh}
+      </button>
       {pricesLoading ? <PageSkeleton /> : pricesError ? (
         <p role="alert" className="mt-8 text-sm text-red-700">{tk.buyer.loadError}</p>
       ) : priceListings.length === 0 ? (
