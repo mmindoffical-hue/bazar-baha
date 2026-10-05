@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, ChevronRight, Home, MapPin, Search, ShoppingBasket, UserRound } from 'lucide-react'
 import { tk, type PageKey } from './i18n/tk'
 import { useAuth } from './lib/AuthContext'
@@ -17,6 +17,7 @@ type PriceListing = {
   price_id: string
   price: number
   in_stock: boolean
+  video_path: string | null
   updated_at: string
   store_name: string
   product_id: string
@@ -79,7 +80,247 @@ type StorePrice = {
   product_id: string
   price: number | string
   in_stock: boolean
+  video_path: string | null
   updated_at: string
+}
+
+const videoMimeTypes = [
+  'video/mp4',
+  'video/webm;codecs=vp9',
+  'video/webm;codecs=vp8',
+  'video/webm',
+]
+
+function StoreVideoCapture({
+  storeId,
+  productId,
+  currentVideoPath,
+  onUploaded,
+  onClose,
+}: {
+  storeId: string
+  productId: string
+  currentVideoPath: string | null
+  onUploaded: (path: string) => void
+  onClose: () => void
+}) {
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [recording, setRecording] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const mountedRef = useRef(true)
+  const chunksRef = useRef<Blob[]>([])
+  const startedAtRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mimeTypeRef = useRef('')
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setCameraStream(null)
+  }
+
+  const clearTimers = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (stopTimerRef.current) clearTimeout(stopTimerRef.current)
+    timerRef.current = null
+    stopTimerRef.current = null
+  }
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      clearTimers()
+      const recorder = recorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        recorder.stop()
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+  }, [previewUrl])
+
+  const finishRecording = () => {
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state === 'inactive') return
+    clearTimers()
+    setElapsedSeconds(Math.min(10, Math.floor((Date.now() - startedAtRef.current) / 1000)))
+    recorder.stop()
+  }
+
+  const beginRecording = async () => {
+    setError('')
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError(tk.storePrices.unsupportedVideo)
+      return
+    }
+    const mimeType = videoMimeTypes.find((type) => MediaRecorder.isTypeSupported(type))
+    if (!mimeType) {
+      setError(tk.storePrices.unsupportedVideo)
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      streamRef.current = stream
+      setCameraStream(stream)
+      mimeTypeRef.current = mimeType
+      chunksRef.current = []
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 700000 })
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType })
+        const url = URL.createObjectURL(blob)
+        setPreviewUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous)
+          return url
+        })
+        setRecording(false)
+        stopCamera()
+      }
+      startedAtRef.current = Date.now()
+      setElapsedSeconds(0)
+      setRecording(true)
+      recorder.start(250)
+      timerRef.current = setInterval(() => {
+        setElapsedSeconds(Math.min(10, Math.floor((Date.now() - startedAtRef.current) / 1000)))
+      }, 200)
+      stopTimerRef.current = setTimeout(finishRecording, 10000)
+    } catch (cameraError) {
+      if (!mountedRef.current) return
+      stopCamera()
+      const errorName = cameraError instanceof DOMException ? cameraError.name : ''
+      setError(errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError' || errorName === 'SecurityError'
+        ? tk.storePrices.cameraPermission
+        : tk.storePrices.unsupportedVideo)
+    }
+  }
+
+  const retake = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setPreviewUrl('')
+    setElapsedSeconds(0)
+    setError('')
+  }
+
+  const uploadVideo = async () => {
+    if (!supabase || !previewUrl || uploading) return
+    if (elapsedSeconds < 3) {
+      setError(tk.storePrices.videoTooShort)
+      return
+    }
+    setUploading(true)
+    setError('')
+    let uploadedPath = ''
+    try {
+      const response = await fetch(previewUrl)
+      const blob = await response.blob()
+      if (blob.size > 3145728) {
+        setError(tk.storePrices.videoTooLarge)
+        setUploading(false)
+        return
+      }
+      const isMp4 = mimeTypeRef.current === 'video/mp4'
+      const extension = isMp4 ? 'mp4' : 'webm'
+      const contentType = isMp4 ? 'video/mp4' : 'video/webm'
+      uploadedPath = `${storeId}/${productId}-${Date.now()}.${extension}`
+      const { error: uploadError } = await supabase.storage
+        .from('store-videos')
+        .upload(uploadedPath, blob, { contentType, upsert: false })
+      if (uploadError) throw uploadError
+
+      const { data, error: updateError } = await supabase
+        .from('prices')
+        .update({ video_path: uploadedPath })
+        .eq('store_id', storeId)
+        .eq('product_id', productId)
+        .select('id')
+        .maybeSingle()
+      if (updateError || !data) throw updateError ?? new Error('price not found')
+
+      if (currentVideoPath) {
+        const { error: removeError } = await supabase.storage.from('store-videos').remove([currentVideoPath])
+        if (removeError) console.warn('Old product video could not be removed.', removeError)
+      }
+      onUploaded(uploadedPath)
+      onClose()
+    } catch {
+      if (uploadedPath) {
+        const { error: cleanupError } = await supabase.storage.from('store-videos').remove([uploadedPath])
+        if (cleanupError) console.warn('Unlinked product video could not be removed.', cleanupError)
+      }
+      setError(tk.storePrices.videoUploadError)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-3 border-l-2 border-emerald-800 pl-3">
+      {cameraStream && !previewUrl && (
+        <video
+          ref={(element) => { if (element) element.srcObject = cameraStream }}
+          autoPlay
+          muted
+          playsInline
+          className="aspect-video w-full rounded-md bg-black object-cover"
+        />
+      )}
+      {previewUrl && <video src={previewUrl} controls playsInline className="aspect-video w-full rounded-md bg-black" />}
+      <p className="text-sm tabular-nums text-stone-700">{elapsedSeconds} / 10 {tk.storePrices.videoSeconds}</p>
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        {!previewUrl && !recording && (
+          <button type="button" onClick={() => void beginRecording()} className="min-h-11 rounded-md bg-emerald-800 px-4 text-sm font-semibold text-white">
+            {tk.storePrices.startRecording}
+          </button>
+        )}
+        {recording && (
+          <button type="button" disabled={elapsedSeconds < 3} onClick={finishRecording} className="min-h-11 rounded-md border border-stone-300 px-4 text-sm font-semibold text-stone-800 disabled:opacity-50">
+            {tk.storePrices.stopRecording}
+          </button>
+        )}
+        {previewUrl && (
+          <>
+            <button type="button" disabled={uploading} onClick={retake} className="min-h-11 rounded-md border border-stone-300 px-4 text-sm font-semibold text-stone-800 disabled:opacity-50">
+              {tk.storePrices.retakeVideo}
+            </button>
+            <button type="button" disabled={uploading} onClick={() => void uploadVideo()} className="min-h-11 rounded-md bg-emerald-800 px-4 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">
+              {uploading ? tk.storePrices.uploadingVideo : tk.storePrices.uploadVideo}
+            </button>
+          </>
+        )}
+        <button type="button" disabled={uploading} onClick={onClose} className="min-h-11 px-3 text-sm font-semibold text-stone-700 disabled:opacity-50">
+          {tk.storePrices.closeCamera}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function StorePriceManager({ storeId }: { storeId: string }) {
@@ -97,6 +338,7 @@ function StorePriceManager({ storeId }: { storeId: string }) {
   const [inStock, setInStock] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [videoPriceId, setVideoPriceId] = useState('')
 
   const loadData = async () => {
     if (!supabase) {
@@ -108,7 +350,7 @@ function StorePriceManager({ storeId }: { storeId: string }) {
     const [categoryResult, productResult, priceResult] = await Promise.all([
       supabase.from('categories').select('id, name_tk').order('name_tk'),
       supabase.from('products').select('id, category_id, name_tk, unit').order('name_tk'),
-      supabase.from('prices').select('id, product_id, price, in_stock, updated_at')
+      supabase.from('prices').select('id, product_id, price, in_stock, video_path, updated_at')
         .eq('store_id', storeId).order('updated_at', { ascending: false }),
     ])
     if (categoryResult.error || productResult.error || priceResult.error) {
@@ -204,6 +446,10 @@ function StorePriceManager({ storeId }: { storeId: string }) {
       setError(tk.storePrices.deleteError)
       return
     }
+    if (price.video_path) {
+      const { error: videoDeleteError } = await supabase.storage.from('store-videos').remove([price.video_path])
+      if (videoDeleteError) console.warn('Deleted product video could not be removed.', videoDeleteError)
+    }
     setPrices((current) => current.filter((item) => item.id !== price.id))
     setNotice(tk.storePrices.deleted)
     if (editingId === price.id) resetForm()
@@ -235,6 +481,24 @@ function StorePriceManager({ storeId }: { storeId: string }) {
                         <p className="mt-1 text-xs text-stone-500">
                           {tk.buyer.updated}: {new Date(price.updated_at).toLocaleString('tk-TM')}
                         </p>
+                        <button
+                          type="button"
+                          onClick={() => setVideoPriceId((current) => current === price.id ? '' : price.id)}
+                          className="mt-2 min-h-10 rounded-md border border-emerald-800 px-3 text-sm font-semibold text-emerald-900"
+                        >
+                          {tk.storePrices.recordVideo}
+                        </button>
+                        {videoPriceId === price.id && (
+                          <StoreVideoCapture
+                            storeId={storeId}
+                            productId={price.product_id}
+                            currentVideoPath={price.video_path}
+                            onUploaded={(videoPath) => setPrices((current) => current.map((item) => (
+                              item.id === price.id ? { ...item, video_path: videoPath } : item
+                            )))}
+                            onClose={() => setVideoPriceId('')}
+                          />
+                        )}
                       </div>
                       <div className="flex shrink-0 gap-2">
                         <button type="button" onClick={() => editPrice(price)} className="min-h-9 rounded-md border border-stone-300 px-2 text-xs font-semibold text-emerald-900">
@@ -613,6 +877,26 @@ function PageSkeleton({ rows = 4 }: { rows?: number }) {
   )
 }
 
+function BuyerVideo({ videoPath }: { videoPath: string }) {
+  const [open, setOpen] = useState(false)
+  const videoUrl = supabase?.storage.from('store-videos').getPublicUrl(videoPath).data.publicUrl
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="min-h-10 rounded-md border border-emerald-800 px-3 text-sm font-semibold text-emerald-900"
+      >
+        {open ? tk.buyer.closeVideo : tk.buyer.watchVideo}
+      </button>
+      {open && videoUrl && (
+        <video src={videoUrl} controls playsInline preload="none" className="mt-3 aspect-video w-full rounded-md bg-black" />
+      )}
+    </div>
+  )
+}
+
 function relativeTime(updatedAt: string) {
   const elapsedMinutes = Math.max(0, Math.floor((Date.now() - new Date(updatedAt).getTime()) / 60000))
   if (elapsedMinutes < 1) return tk.buyer.relativeTime.justNow
@@ -716,7 +1000,7 @@ export default function App() {
     setPricesError(false)
     void supabase
       .from('price_list')
-      .select('price_id, price, in_stock, updated_at, store_name, product_id, product_name, unit')
+      .select('price_id, price, in_stock, video_path, updated_at, store_name, product_id, product_name, unit')
       .eq('product_id', selectedProduct.id)
       .order('price', { ascending: true })
       .then(({ data, error: requestError }) => {
@@ -828,6 +1112,7 @@ export default function App() {
                     <span>{tk.buyer.updated}: {relativeTime(listing.updated_at)}</span>
                     {isOld && <span className="font-semibold">{tk.buyer.oldData}</span>}
                   </div>
+                  {listing.video_path && <BuyerVideo videoPath={listing.video_path} />}
                 </article>
               )
             })}
