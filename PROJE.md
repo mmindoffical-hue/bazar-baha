@@ -140,6 +140,8 @@ yapay zekâya yapıştır.
 > "Realtime eklenmedi. Ürün sayfasında 'Täzele' düğmesiyle veriyi elle yenile."
 
 ## Adım 9 - Alışveriş listesi + yanlış fiyat bildirimi
+> Durum: Yapıldı.
+
 > "Alışveriş listesi (telefonda localStorage, girişte isteğe bağlı), her
 > ürün için en ucuz mağaza ve toplam tutar. 'Yanlış fiyat' butonu reports
 > tablosuna yazsın."

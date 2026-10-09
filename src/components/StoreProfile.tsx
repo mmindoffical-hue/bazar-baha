@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { MapPin } from 'lucide-react'
 import { tk } from '../i18n/tk'
 import { prepareStorePhoto } from '../lib/formatting'
-import type { StoreFields, StoreRecord, StoreStatus } from '../lib/types'
+import type { StoreFields, StorePrice, StoreRecord, StoreStatus } from '../lib/types'
 import { supabase } from '../lib/supabase'
 import { StorePriceManager } from './StorePriceManager'
 
@@ -152,7 +152,120 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
           </div>
         )}
       </div>
+      <AdminReports busyStoreId={busyStoreId} onSuspend={(storeId) => onChangeStatus(storeId, 'suspended')} />
     </section>
+  )
+}
+
+type ReportEntry = { id: string; price_id: string; reason: string | null }
+type ReportListing = Pick<StorePrice, 'price' | 'updated_at'> & {
+  price_id: string
+  store_id: string
+  store_name: string
+  product_name: string
+}
+
+function AdminReports({ busyStoreId, onSuspend }: { busyStoreId: string; onSuspend: (storeId: string) => void }) {
+  const [groups, setGroups] = useState<{ priceId: string; listing: ReportListing | null; reasons: string[] }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busyPriceId, setBusyPriceId] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const loadReports = async () => {
+    if (!supabase) {
+      setError(tk.reports.loadError)
+      setLoading(false)
+      return
+    }
+    const client = supabase
+    setLoading(true)
+    const { data, error: requestError } = await client
+      .from('reports')
+      .select('id, price_id, reason')
+      .order('created_at', { ascending: false })
+    if (requestError) {
+      setError(tk.reports.loadError)
+      setLoading(false)
+      return
+    }
+    const entries = (data ?? []) as ReportEntry[]
+    if (entries.length === 0) {
+      setGroups([])
+      setError('')
+      setLoading(false)
+      return
+    }
+    const priceIds = [...new Set(entries.map((entry) => entry.price_id))]
+    const { data: priceData, error: priceError } = await client
+      .from('price_list')
+      .select('price_id, store_id, store_name, product_name, price, updated_at')
+      .in('price_id', priceIds)
+    if (priceError) {
+      setError(tk.reports.loadError)
+      setLoading(false)
+      return
+    }
+    const listings = (priceData ?? []) as ReportListing[]
+    const grouped = new Map<string, { priceId: string; listing: ReportListing | null; reasons: string[] }>()
+    for (const entry of entries) {
+      const group = grouped.get(entry.price_id) ?? {
+        priceId: entry.price_id,
+        listing: listings.find((listing) => listing.price_id === entry.price_id) ?? null,
+        reasons: [],
+      }
+      group.reasons.push(entry.reason?.trim() || tk.reports.noReason)
+      grouped.set(entry.price_id, group)
+    }
+    setGroups([...grouped.values()])
+    setError('')
+    setLoading(false)
+  }
+
+  useEffect(() => { void loadReports() }, [])
+
+  const closeReport = async (priceId: string) => {
+    if (!supabase) return
+    setBusyPriceId(priceId)
+    setError('')
+    setNotice('')
+    const { error: deleteError } = await supabase.from('reports').delete().eq('price_id', priceId)
+    setBusyPriceId('')
+    if (deleteError) {
+      setError(tk.reports.actionError)
+      return
+    }
+    setNotice(tk.reports.closed)
+    await loadReports()
+  }
+
+  return (
+    <div>
+      <h3 className="mb-3 font-semibold text-stone-800">{tk.reports.adminTitle}</h3>
+      {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
+      {notice && <p role="status" className="mb-3 text-sm text-emerald-800">{notice}</p>}
+      {loading ? <p className="text-sm text-stone-500">{tk.stores.loading}</p> : groups.length === 0 ? (
+        <p className="text-sm text-stone-500">{tk.reports.noReports}</p>
+      ) : groups.map((group) => (
+        <article key={group.priceId} className="space-y-3 border-b border-stone-200 py-4">
+          {group.listing ? (
+            <>
+              <h4 className="font-semibold text-stone-900">{group.listing.product_name}</h4>
+              <p className="text-sm text-stone-700">{tk.buyer.store}: {group.listing.store_name}</p>
+              <p className="text-sm text-stone-700">{tk.reports.currentPrice}: {Number(group.listing.price).toFixed(2)} {tk.buyer.currency}</p>
+            </>
+          ) : <p className="text-sm text-stone-600">{tk.reports.priceUnavailable}</p>}
+          <p className="text-sm font-semibold text-stone-800">{tk.reports.count(group.reasons.length)}</p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-stone-600">
+            {group.reasons.map((reason, index) => <li key={`${group.priceId}-${index}`}>{reason}</li>)}
+          </ul>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button type="button" disabled={busyPriceId === group.priceId} onClick={() => void closeReport(group.priceId)} className="min-h-11 rounded-md border border-stone-300 px-3 text-sm font-semibold text-stone-800 disabled:opacity-60">{tk.reports.closeReport}</button>
+            {group.listing && <button type="button" disabled={busyStoreId === group.listing.store_id} onClick={() => onSuspend(group.listing!.store_id)} className="min-h-11 rounded-md bg-red-800 px-3 text-sm font-semibold text-white disabled:opacity-60">{tk.reports.suspendStore}</button>}
+          </div>
+        </article>
+      ))}
+    </div>
   )
 }
 

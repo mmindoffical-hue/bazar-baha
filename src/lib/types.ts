@@ -2,6 +2,7 @@ export type Category = { id: number; name_tk: string }
 export type Product = { id: string; name_tk: string; unit: string }
 export type PriceListing = {
   price_id: string
+  store_id: string
   price: number
   in_stock: boolean
   photo_paths: string[]

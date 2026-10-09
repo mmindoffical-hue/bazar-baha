@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { tk, type PageKey } from './i18n/tk'
-import { useAuth } from './lib/AuthContext'
+import { readBasket, writeBasket, type BasketItem } from './lib/basket'
 import type { Category, Product } from './lib/types'
 import { BottomNavigation } from './components/BottomNavigation'
 import { BasketPage } from './pages/BasketPage'
@@ -15,7 +15,20 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const { user, loading } = useAuth()
+  const [basket, setBasket] = useState<BasketItem[]>(readBasket)
+
+  useEffect(() => {
+    writeBasket(basket)
+  }, [basket])
+
+  const updateBasket = (nextBasket: BasketItem[]) => {
+    setBasket(nextBasket)
+  }
+
+  const addToBasket = (productId: string) => {
+    if (basket.some((item) => item.productId === productId)) return
+    updateBasket([...basket, { productId, qty: 1 }])
+  }
 
   const openPage = (page: PageKey) => {
     setActivePage(page)
@@ -71,10 +84,10 @@ export default function App() {
             onSelectProduct={setSelectedProduct}
           />
         )}
-        {selectedProduct && <ProductPage product={selectedProduct} />}
+        {selectedProduct && <ProductPage product={selectedProduct} basket={basket} onAddToBasket={addToBasket} onOpenProfile={() => openPage('profile')} />}
         <ProfilePage visible={activePage === 'profile'} />
         {activePage === 'basket' && (
-          <BasketPage loading={loading} isSignedIn={Boolean(user)} onOpenProfile={() => setActivePage('profile')} />
+          <BasketPage basket={basket} onBasketChange={updateBasket} />
         )}
       </main>
 

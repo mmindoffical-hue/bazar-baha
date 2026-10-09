@@ -205,7 +205,7 @@ create policy "products: admin yazar" on public.products
 -- prices: sadece ONAYLI dukkan kendi fiyatini yazar
 create policy "prices: onayli dukkanlarin fiyatlari herkese" on public.prices
   for select to anon, authenticated
-  using (exists (select 1 from public.stores s where s.id = store_id and s.status = 'approved'));
+  using (public.is_admin() or exists (select 1 from public.stores s where s.id = store_id and s.status = 'approved'));
 create policy "prices: onayli dukkan ekler" on public.prices
   for insert to authenticated with check (public.owns_approved_store(store_id));
 create policy "prices: onayli dukkan gunceller" on public.prices
