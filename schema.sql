@@ -293,7 +293,8 @@ create policy "product photos: onayli dukkan yukler" on storage.objects
 create policy "product photos: onayli dukkan siler" on storage.objects
   for delete to authenticated
   using (bucket_id = 'product-photos'
-         and public.owns_approved_store(((storage.foldername(name))[1])::uuid));
+         and (public.is_admin()
+              or public.owns_approved_store(((storage.foldername(name))[1])::uuid)));
 
 -- 8. BASLANGIC VERISI (admin sonra degistirebilir) -----------------------
 insert into public.categories (slug, name_tk) values

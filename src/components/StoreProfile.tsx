@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { MapPin } from 'lucide-react'
 import { tk } from '../i18n/tk'
 import { prepareStorePhoto } from '../lib/formatting'
+import { AdminCatalog } from './AdminCatalog'
 import type { StoreFields, StorePrice, StoreRecord, StoreStatus } from '../lib/types'
 import { supabase } from '../lib/supabase'
 import { StorePriceManager } from './StorePriceManager'
@@ -103,11 +104,21 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
   notice: string
   onChangeStatus: (storeId: string, status: StoreStatus) => void
 }) {
+  const [activeTab, setActiveTab] = useState<'stores' | 'catalog'>('stores')
   const storeStatusLabel = (status: StoreStatus) => tk.stores.statuses[status]
 
   return (
     <section className="space-y-6 border-t-2 border-stone-900 pt-5">
       <h2 className="text-xl font-semibold text-stone-900">{tk.stores.adminTitle}</h2>
+      <div role="tablist" aria-label={tk.stores.adminTitle} className="flex border-b border-stone-200">
+        <button type="button" role="tab" aria-selected={activeTab === 'stores'} onClick={() => setActiveTab('stores')} className={`min-h-11 border-b-2 px-4 text-sm font-semibold ${activeTab === 'stores' ? 'border-emerald-800 text-emerald-900' : 'border-transparent text-stone-600'}`}>
+          {tk.stores.allStores}
+        </button>
+        <button type="button" role="tab" aria-selected={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} className={`min-h-11 border-b-2 px-4 text-sm font-semibold ${activeTab === 'catalog' ? 'border-emerald-800 text-emerald-900' : 'border-transparent text-stone-600'}`}>
+          {tk.adminCatalog.title}
+        </button>
+      </div>
+      {activeTab === 'catalog' ? <AdminCatalog /> : <div role="tabpanel" className="space-y-6">
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-emerald-800">{notice}</p>}
       <div>
@@ -153,6 +164,7 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
         )}
       </div>
       <AdminReports busyStoreId={busyStoreId} onSuspend={(storeId) => onChangeStatus(storeId, 'suspended')} />
+      </div>}
     </section>
   )
 }

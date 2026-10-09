@@ -74,7 +74,11 @@ fiyata göre sıralı, güncelleme saati, video) -> Harita -> Alışveriş liste
 **Dükkân:** Başvuru formu (ad, telefon, adres, haritadan konum, vitrin foto)
 -> "Onay bekleniyor" -> Ürünlerim (fiyat gir + video çek) -> Hızlı güncelle.
 **Admin:** Bekleyen başvurular (foto + telefon, Onayla/Reddet), Dükkânlar
-(askıya al), Ürün kataloğu, Şikâyetler.
+(askıya al), Şikâyetler. Profil içindeki `Katalog` sekmesinde kategorileri
+(slug + Türkmence ad) ve ürünleri (kategori, ad, birim) yönet; ürünleri
+kategoriye göre süz, tek tek veya satır başına bir ürün biçiminde toplu ekle.
+Ürün silindiğinde bağlı dükkân fiyatları cascade ile silinir ve ürün fotoğrafları
+Storage'dan temizlenir.
 
 ---
 
