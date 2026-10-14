@@ -8,6 +8,7 @@ import {
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import { tk } from '../i18n/tk'
+import { withRequestTimeout } from './publicCache'
 
 type UserRole = 'user' | 'admin'
 
@@ -21,6 +22,25 @@ type AuthContextValue = {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
+const roleCachePrefix = 'bazar-baha:profile-role:'
+
+function readCachedRole(userId: string): UserRole | null {
+  try {
+    const role = localStorage.getItem(`${roleCachePrefix}${userId}`)
+    return role === 'admin' || role === 'user' ? role : null
+  } catch (error) {
+    console.warn('Cached profile role read failed.', error)
+    return null
+  }
+}
+
+function writeCachedRole(userId: string, role: UserRole) {
+  try {
+    localStorage.setItem(`${roleCachePrefix}${userId}`, role)
+  } catch (error) {
+    console.warn('Cached profile role write failed.', error)
+  }
+}
 
 function getAuthError(message: string) {
   const normalized = message.toLowerCase()
@@ -63,17 +83,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentRequest = ++requestId
       const currentUser = session?.user ?? null
       setUser(currentUser)
-      setRole(null)
+      const cachedRole = currentUser ? readCachedRole(currentUser.id) : null
+      setRole(cachedRole)
+      if (cachedRole) setLoading(false)
+      else setLoading(Boolean(currentUser))
 
       if (currentUser) {
-        const { data } = await client
-          .from('profiles')
-          .select('role')
-          .eq('id', currentUser.id)
-          .maybeSingle()
-
-        if (!active || currentRequest !== requestId) return
-        setRole(data?.role === 'admin' ? 'admin' : 'user')
+        try {
+          const { data, error } = await withRequestTimeout(() => client
+            .from('profiles')
+            .select('role')
+            .eq('id', currentUser.id)
+            .maybeSingle())
+          if (error) throw error
+          if (!active || currentRequest !== requestId) return
+          const verifiedRole: UserRole = data?.role === 'admin' ? 'admin' : 'user'
+          writeCachedRole(currentUser.id, verifiedRole)
+          setRole(verifiedRole)
+        } catch (error) {
+          console.warn('Profile role verification failed.', error)
+        }
       }
 
       if (active && currentRequest === requestId) setLoading(false)

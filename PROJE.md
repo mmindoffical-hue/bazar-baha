@@ -46,17 +46,25 @@ en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
 
 ## 4. Veritabanı (özet - tam hali schema.sql)
 - `profiles` (rol: user | admin)
-- `stores` (owner_id, name, phone, city, address, lat, lng, photo_path,
-  **status: pending | approved | suspended**) - status sadece admin RPC'si
-  `set_store_status` ile değişir
+- `stores` (owner_id, name, phone, city, address, lat, lng, photo_path, logo_path,
+  serial_no, **status: pending | approved | suspended**) - status sadece admin
+  RPC'si `set_store_status` ile değişir; `serial_no` onayda sunucuda atanır ve
+  istemciden yazılamaz
 - `categories`, `products` (katalog, sadece admin yazar)
 - `prices` (store_id, product_id, price, in_stock, photo_paths, video_path, updated_at)
   - her dükkân ürün başına tek satır; `updated_at` sunucuda otomatik yazılır
 - `reports` (yanlış fiyat bildirimi)
-- `price_list` görünümü: alıcı ekranı için birleşik liste
-- Storage: `product-photos` (herkese açık), `store-videos` (eski, kullanılmıyor), `store-photos` (özel)
+- `price_list` görünümü: alıcı ekranı için birleşik liste; dükkân logo yolu ve seri numarası da içerir
+- Storage: `product-photos` (herkese açık), `store-videos` (eski, kullanılmıyor),
+  `store-photos` (özel), `store-logos` (herkese açık; en fazla 512 KB PNG/JPEG/WebP)
   - Video yolu: `{store_id}/{product_id}-{zaman}.mp4`
   - Foto yolu: `{user_id}/vitrin.jpg`
+  - Logo yolu: `{store_id}/{zaman}.webp`
+
+> **Canlı veritabanı:** Adım 10A için `stores.logo_path`, `stores.serial_no`,
+> `store-logos` bucket'ı ve `price_list` alanları canlıda zaten uygulanmıştır.
+> Canlıya tekrar SQL çalıştırma veya canlı veritabanına bağlanma; yalnızca
+> kaynak tanımı olan `schema.sql` dosyasını güncel tut.
 
 ## 5. Sahte market sorununun çözümü
 1. Kayıt = başvuru, durum `pending`. Bu durumda fiyat/video yazamaz.
@@ -154,9 +162,36 @@ yapay zekâya yapıştır.
 > "Leaflet + OpenStreetMap ile onaylı dükkânları göster. Dükkân başvurusunda
 > haritadan konum seçilsin. Harita sadece açılınca yüklensin."
 
+## Adım 10A - Harita, logo ve seri numarası
+> Durum: Uygulandı. Leaflet/markercluster npm paketleri kullanılır; harita
+> ekranı ve konum seçici tembel yüklenir. Başvuruda konum zorunlu, eski
+> konumsuz dükkân düzenlemesinde uyarı gösterilir. İsteğe bağlı logolar
+> tarayıcıda kare WebP/JPEG'e dönüştürülerek yüklenir. Onay RPC'si seri
+> numarasını sunucuda atar; admin seri numarasıyla dükkân arayabilir.
+>
+> Alıcı haritası onaylı, konumlu dükkânları marker cluster ile gösterir;
+> ürün sayfasından o ürünü satan dükkânların fiyatlı haritası açılır. Dükkân
+> detayında ürün fiyatı, güncellenme zamanı, eski bilgi etiketi, küçük fotoğraf
+> ve sepete ekle düğmesi görünür. Canlı schema değişiklikleri kullanıcı tarafından
+> önceden uygulanmıştır; canlıya dokunma, yalnız `schema.sql` kaynak dosyasını
+> güncel tut.
+
 ## Adım 11 - Çevrimdışı / yavaş internet
-> "PWA önbelleği: uygulama dosyaları ve son yüklenen fiyat listesi çevrimdışı
-> da görünsün. Fotoğraflar tembel yüklensin."
+> Herkese açık kategori, ürün, fiyat listesi ve harita dükkân verilerini
+> `key`, `data`, `fetchedAt` alanlarıyla tarayıcıda önbelleğe al. Önbellek
+> önce gösterilsin, Supabase arka planda yenilensin; istekler 10 saniyede
+> zaman aşımına uğrasın ve hata/zaman aşımında eski veri gösterilsin.
+> Fiyat listesi önbelleği en fazla 50 kayıt tutsun. Önbellekten gösterilen
+> veri Türkmence çevrimdışı şeridi taşısın; yenilenince şerit kaybolsun.
+> Oturum açan kullanıcının `profiles.role` değeri kullanıcı kimliğiyle
+> saklansın, açılışta kullanılsın ve arkadan doğrulansın. Oturum, profil,
+> yönetim, rapor, özel fotoğraf ve yazma istekleri önbelleğe alınmasın.
+> Service worker uygulama dosyalarını önbelleğe alsın; `product-photos`
+> küçük kopyaları ve OSM karoları CacheFirst ile 7 gün saklansın (sırasıyla
+> en fazla 200 ve 300 kayıt). Supabase API istekleri NetworkOnly olsun.
+> Yeni sürüm için Türkmence güncelleme bildirimi ve düğmesi gösterilsin.
+> Sepet çevrimdışı açılsın ve önbellekteki fiyatları kullansın. Realtime
+> eklenmesin, fotoğraflar tembel yüklensin.
 
 ## Adım 12 - Yayına alma
 - [ ] Kodu GitHub'a yükle.

@@ -1,11 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react'
 import { MapPin } from 'lucide-react'
 import { tk } from '../i18n/tk'
-import { prepareStorePhoto } from '../lib/formatting'
+import { prepareStoreLogo, prepareStorePhoto } from '../lib/formatting'
 import { AdminCatalog } from './AdminCatalog'
 import type { StoreFields, StorePrice, StoreRecord, StoreStatus } from '../lib/types'
 import { supabase } from '../lib/supabase'
 import { StorePriceManager } from './StorePriceManager'
+
+const StoreLocationPicker = lazy(() => import('./StoreLocationPicker'))
 
 const emptyStoreFields: StoreFields = {
   name: '',
@@ -16,15 +18,19 @@ const emptyStoreFields: StoreFields = {
   lng: null,
 }
 
-function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, onPhotoChange, onLocate, locating, error, notice, onSubmit, saving }: {
+function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, onPhotoChange, logo, onLogoChange, onLocationChange, onLocate, locating, visible, error, notice, onSubmit, saving }: {
   store: StoreRecord | null
   photoUrls: Record<string, string>
   fields: StoreFields
   onFieldChange: (key: keyof StoreFields, value: string | number | null) => void
   photo: File | null
   onPhotoChange: (photo: File | null) => void
+  logo: File | null
+  onLogoChange: (logo: File | null) => void
+  onLocationChange: (lat: number, lng: number) => void
   onLocate: () => void
   locating: boolean
+  visible: boolean
   error: string
   notice: string
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -70,6 +76,28 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
             </label>
           </div>
         </div>
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-stone-700">{tk.stores.logo}</p>
+          {store?.logo_path && supabase && !logo && (
+            <img
+              src={supabase.storage.from('store-logos').getPublicUrl(store.logo_path).data.publicUrl}
+              alt={tk.stores.logoPreview}
+              loading="lazy"
+              className="h-16 w-16 rounded-full border border-white object-cover shadow-sm"
+            />
+          )}
+          {logo && <p className="text-sm text-stone-500">{tk.stores.logoSelected}: {logo.name}</p>}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            aria-label={tk.stores.logo}
+            onChange={(event) => onLogoChange(event.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-stone-700 file:mr-3 file:min-h-11 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:font-semibold"
+          />
+        </div>
+        {store && (store.lat === null || store.lng === null) && (
+          <p role="status" className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">{tk.stores.locationMissingWarning}</p>
+        )}
         <button
           type="button"
           onClick={onLocate}
@@ -79,6 +107,11 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
           <MapPin aria-hidden="true" size={18} />
           {locating ? tk.stores.locationLoading : tk.stores.location}
         </button>
+        {visible && (
+          <Suspense fallback={<p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p>}>
+            <StoreLocationPicker lat={fields.lat} lng={fields.lng} onChange={onLocationChange} />
+          </Suspense>
+        )}
         {fields.lat !== null && fields.lng !== null && (
           <p className="text-xs text-stone-500">{fields.lat.toFixed(5)}, {fields.lng.toFixed(5)}</p>
         )}
@@ -105,7 +138,38 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
   onChangeStatus: (storeId: string, status: StoreStatus) => void
 }) {
   const [activeTab, setActiveTab] = useState<'stores' | 'catalog'>('stores')
+  const [serialSearch, setSerialSearch] = useState('')
+  const [serialResult, setSerialResult] = useState<Pick<StoreRecord, 'id' | 'name' | 'city' | 'address' | 'logo_path' | 'serial_no' | 'status'> | null>(null)
+  const [serialSearchError, setSerialSearchError] = useState('')
+  const [serialSearchLoading, setSerialSearchLoading] = useState(false)
   const storeStatusLabel = (status: StoreStatus) => tk.stores.statuses[status]
+
+  const searchStoreBySerial = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSerialSearchError('')
+    setSerialResult(null)
+    const serial = Number(serialSearch.trim())
+    if (!supabase || !Number.isSafeInteger(serial) || serial <= 0) {
+      setSerialSearchError(tk.stores.serialLookupError)
+      return
+    }
+    setSerialSearchLoading(true)
+    const { data, error: requestError } = await supabase
+      .from('stores')
+      .select('id, name, city, address, logo_path, serial_no, status')
+      .eq('serial_no', serial)
+      .maybeSingle()
+    setSerialSearchLoading(false)
+    if (requestError) {
+      setSerialSearchError(tk.stores.serialLookupError)
+      return
+    }
+    if (!data) {
+      setSerialSearchError(tk.stores.serialLookupEmpty)
+      return
+    }
+    setSerialResult(data as Pick<StoreRecord, 'id' | 'name' | 'city' | 'address' | 'logo_path' | 'serial_no' | 'status'>)
+  }
 
   return (
     <section className="space-y-6 border-t-2 border-stone-900 pt-5">
@@ -121,6 +185,43 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
       {activeTab === 'catalog' ? <AdminCatalog /> : <div role="tabpanel" className="space-y-6">
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="text-sm text-emerald-800">{notice}</p>}
+      <section className="space-y-3 rounded-md border border-stone-200 p-4">
+        <h3 className="font-semibold text-stone-800">{tk.stores.serialLookup}</h3>
+        <form onSubmit={(event) => void searchStoreBySerial(event)} className="flex gap-2">
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={serialSearch}
+            onChange={(event) => setSerialSearch(event.target.value)}
+            placeholder={tk.stores.serialLookupPlaceholder}
+            aria-label={tk.stores.serialLookup}
+            className="min-h-11 min-w-0 flex-1 rounded-md border border-stone-300 px-3 text-base"
+          />
+          <button type="submit" disabled={serialSearchLoading} className="min-h-11 rounded-md bg-stone-900 px-4 text-sm font-semibold text-white disabled:opacity-60">
+            {tk.stores.serialLookupSubmit}
+          </button>
+        </form>
+        {serialSearchError && <p role={serialSearchError === tk.stores.serialLookupEmpty ? 'status' : 'alert'} className="text-sm text-stone-700">{serialSearchError}</p>}
+        {serialResult && (
+          <article className="flex gap-3 border-t border-stone-200 pt-3">
+            {serialResult.logo_path && supabase && (
+              <img
+                src={supabase.storage.from('store-logos').getPublicUrl(serialResult.logo_path).data.publicUrl}
+                alt={tk.stores.logoPreview}
+                loading="lazy"
+                className="h-14 w-14 rounded-full object-cover shadow-sm"
+              />
+            )}
+            <div className="min-w-0">
+              <h4 className="font-semibold text-stone-900">{serialResult.name}</h4>
+              <p className="text-sm text-stone-700">{tk.buyer.serialNo(serialResult.serial_no ?? 0)}</p>
+              <p className="text-sm text-stone-700">{serialResult.city || ''}{serialResult.city ? ', ' : ''}{serialResult.address}</p>
+              <p className="text-sm text-stone-500">{storeStatusLabel(serialResult.status)}</p>
+            </div>
+          </article>
+        )}
+      </section>
       <div>
         <h3 className="mb-3 font-semibold text-stone-800">{tk.stores.applications}</h3>
         {stores.filter((item) => item.status === 'pending').length === 0 ? (
@@ -131,6 +232,9 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
             <h4 className="font-semibold text-stone-900">{item.name}</h4>
             <p className="text-sm text-stone-700">{item.phone}</p>
             <p className="text-sm text-stone-700">{item.city || ''}{item.city ? ', ' : ''}{item.address}</p>
+            {item.lat === null || item.lng === null
+              ? <p className="text-sm font-medium text-amber-800">{tk.stores.locationMissingWarning}</p>
+              : item.serial_no !== null && <p className="text-sm text-stone-600">{tk.buyer.serialNo(item.serial_no)}</p>}
             <div className="grid grid-cols-2 gap-2">
               <button type="button" disabled={busyStoreId === item.id} onClick={() => onChangeStatus(item.id, 'approved')} className="min-h-11 rounded-md bg-emerald-800 px-3 text-sm font-semibold text-white disabled:opacity-60">{tk.stores.approve}</button>
               <button type="button" disabled={busyStoreId === item.id} onClick={() => onChangeStatus(item.id, 'suspended')} className="min-h-11 rounded-md border border-stone-400 px-3 text-sm font-semibold text-stone-800 disabled:opacity-60">{tk.stores.suspend}</button>
@@ -146,7 +250,7 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
               <article key={item.id} className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="wrap-break-word font-medium text-stone-900">{item.name}</p>
-                  <p className="text-sm text-stone-500">{storeStatusLabel(item.status)}</p>
+                  <p className="text-sm text-stone-500">{item.serial_no !== null ? tk.buyer.serialNo(item.serial_no) : tk.buyer.noSerialNo} · {storeStatusLabel(item.status)}</p>
                 </div>
                 {item.status !== 'pending' && (
                   <button
@@ -281,12 +385,13 @@ function AdminReports({ busyStoreId, onSuspend }: { busyStoreId: string; onSuspe
   )
 }
 
-export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 'admin' | null }) {
+export function StoreProfile({ userId, role, visible }: { userId: string; role: 'user' | 'admin' | null; visible: boolean }) {
   const [store, setStore] = useState<StoreRecord | null>(null)
   const [stores, setStores] = useState<StoreRecord[]>([])
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [fields, setFields] = useState<StoreFields>(emptyStoreFields)
   const [photo, setPhoto] = useState<File | null>(null)
+  const [logo, setLogo] = useState<File | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [locating, setLocating] = useState(false)
@@ -302,7 +407,7 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
     }
     const client = supabase
     setLoading(true)
-    const request = client.from('stores').select('id, owner_id, name, phone, city, address, lat, lng, photo_path, status')
+    const request = client.from('stores').select('id, owner_id, name, phone, city, address, lat, lng, photo_path, logo_path, serial_no, status')
     const { data, error: requestError } = role === 'admin'
       ? await request.order('created_at', { ascending: false })
       : await request.eq('owner_id', userId).maybeSingle()
@@ -351,6 +456,10 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
     setFields((previous) => ({ ...previous, [key]: value }))
   }
 
+  const updateLocation = (lat: number, lng: number) => {
+    setFields((previous) => ({ ...previous, lat, lng }))
+  }
+
   const locateUser = () => {
     if (!navigator.geolocation) {
       setError(tk.stores.locationError)
@@ -378,6 +487,10 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
     event.preventDefault()
     setError('')
     setNotice('')
+    if (!store && (fields.lat === null || fields.lng === null)) {
+      setError(tk.stores.locationRequired)
+      return
+    }
     if (!store && !photo) {
       setError(tk.stores.photoRequired)
       return
@@ -388,6 +501,8 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
     }
 
     setSaving(true)
+    let storeSaved = false
+    let logoSaveFailed = false
     try {
       let photoPath = store?.photo_path ?? null
       if (photo) {
@@ -405,15 +520,45 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
         photo_path: photoPath,
       }
       const result = store
-        ? await supabase.from('stores').update(storeFields).eq('id', store.id)
-        : await supabase.from('stores').insert({ owner_id: userId, ...storeFields })
+        ? await supabase.from('stores').update(storeFields).eq('id', store.id).select('id').single()
+        : await supabase.from('stores').insert({ owner_id: userId, ...storeFields }).select('id').single()
 
       if (result.error) throw result.error
+      storeSaved = true
+      const storeId = result.data.id
+      if (logo) {
+        logoSaveFailed = true
+        const compressedLogo = await prepareStoreLogo(logo)
+        const logoPath = `${storeId}/${Date.now()}.webp`
+        const { error: uploadError } = await supabase.storage.from('store-logos').upload(logoPath, compressedLogo, {
+          contentType: compressedLogo.type,
+          upsert: false,
+        })
+        if (uploadError) throw uploadError
+        const { error: updateLogoError } = await supabase.from('stores').update({ logo_path: logoPath }).eq('id', storeId)
+        if (updateLogoError) {
+          const { error: cleanupError } = await supabase.storage.from('store-logos').remove([logoPath])
+          if (cleanupError) console.warn('Could not remove an unlinked store logo', cleanupError)
+          throw updateLogoError
+        }
+        const oldLogoPath = store?.logo_path
+        if (oldLogoPath && oldLogoPath !== logoPath) {
+          const { error: removeError } = await supabase.storage.from('store-logos').remove([oldLogoPath])
+          if (removeError) console.warn('Could not remove the replaced store logo', removeError)
+        }
+        logoSaveFailed = false
+      }
       setPhoto(null)
+      setLogo(null)
       setNotice(tk.stores.saved)
       await loadStores()
-    } catch {
-      setError(tk.stores.saveError)
+    } catch (saveError) {
+      console.error('Store save failed', saveError)
+      if (logoSaveFailed && storeSaved) {
+        setError(saveError instanceof Error && saveError.message === 'size' ? tk.stores.logoSizeError : tk.stores.logoSaveError)
+      } else {
+        setError(tk.stores.saveError)
+      }
     } finally {
       setSaving(false)
     }
@@ -421,6 +566,9 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
 
   const changeStoreStatus = async (storeId: string, status: StoreStatus) => {
     if (!supabase) return
+    const target = stores.find((item) => item.id === storeId)
+    if (status === 'approved' && target && (target.lat === null || target.lng === null)
+      && !window.confirm(tk.stores.approveWithoutLocation)) return
     setError('')
     setNotice('')
     setBusyStoreId(storeId)
@@ -433,7 +581,21 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
       setError(tk.stores.statusError)
       return
     }
-    setNotice(tk.stores.statusSaved)
+    if (status === 'approved') {
+      const { data: approvedStore, error: serialError } = await supabase
+        .from('stores')
+        .select('serial_no')
+        .eq('id', storeId)
+        .single()
+      if (serialError || approvedStore?.serial_no === null || approvedStore?.serial_no === undefined) {
+        setError(tk.stores.statusError)
+        await loadStores()
+        return
+      }
+      setNotice(tk.stores.serialAssigned(approvedStore.serial_no))
+    } else {
+      setNotice(tk.stores.statusSaved)
+    }
     await loadStores()
   }
 
@@ -449,8 +611,12 @@ export function StoreProfile({ userId, role }: { userId: string; role: 'user' | 
           onFieldChange={updateField}
           photo={photo}
           onPhotoChange={setPhoto}
+          logo={logo}
+          onLogoChange={setLogo}
+          onLocationChange={updateLocation}
           onLocate={locateUser}
           locating={locating}
+          visible={visible}
           error={error}
           notice={notice}
           onSubmit={(event) => void saveStore(event)}

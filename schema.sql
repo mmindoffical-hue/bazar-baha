@@ -2,11 +2,13 @@
 -- BAZAR BAHA - V1 veritabani (Supabase / PostgreSQL)
 -- Kullanim: Supabase > SQL Editor > New query > hepsini yapistir > Run
 -- Bir kez calistir. Hata alirsan bana hatayi oldugu gibi gonder.
+-- Adim 10A alanlari canliya onceden uygulanmistir; canlida yeniden calistirma.
 -- =====================================================================
 
 -- 1. TIPLER ------------------------------------------------------------
 create type public.user_role   as enum ('user', 'admin');
 create type public.store_status as enum ('pending', 'approved', 'suspended');
+create sequence public.store_serial_no_seq;
 
 -- 2. TABLOLAR ----------------------------------------------------------
 create table public.profiles (
@@ -26,6 +28,8 @@ create table public.stores (
   lat         double precision check (lat between -90 and 90),
   lng         double precision check (lng between -180 and 180),
   photo_path  text,                                   -- vitrin fotografi (store-photos)
+  logo_path   text,
+  serial_no   bigint unique,
   status      public.store_status not null default 'pending',
   created_at  timestamptz not null default now(),
   approved_at timestamptz
@@ -125,6 +129,10 @@ begin
   end if;
   update public.stores
      set status = p_status,
+         serial_no = case
+           when p_status = 'approved' then coalesce(serial_no, nextval('public.store_serial_no_seq'))
+           else serial_no
+         end,
          approved_at = case when p_status = 'approved' then now() else approved_at end
    where id = p_store;
 end;
@@ -145,7 +153,7 @@ grant update (display_name) on public.profiles to authenticated;
 grant select on public.stores to anon, authenticated;
 grant insert (owner_id, name, phone, city, address, lat, lng, photo_path)
   on public.stores to authenticated;
-grant update (name, phone, city, address, lat, lng, photo_path)
+grant update (name, phone, city, address, lat, lng, photo_path, logo_path)
   on public.stores to authenticated;
 
 -- katalog: herkes okur, yazmayi RLS ile sadece admin yapar
@@ -232,6 +240,8 @@ select pr.id         as price_id,
        pr.updated_at,
        s.id          as store_id,
        s.name        as store_name,
+       s.logo_path   as store_logo_path,
+       s.serial_no   as store_serial_no,
        s.city,
        s.lat,
        s.lng,
@@ -252,6 +262,8 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
      array['video/mp4', 'video/webm', 'video/quicktime']),
   ('store-photos', 'store-photos', false, 2097152,
       array['image/jpeg', 'image/png', 'image/webp']),
+  ('store-logos', 'store-logos', true, 512000,
+      array['image/png', 'image/jpeg', 'image/webp']),
     ('product-photos', 'product-photos', true, 512000,
       array['image/jpeg'])
 on conflict (id) do nothing;
@@ -283,6 +295,32 @@ create policy "photos: sahibi siler" on storage.objects
   for delete to authenticated
   using (bucket_id = 'store-photos'
          and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+create policy "store logos: herkes gorur" on storage.objects
+  for select to anon, authenticated using (bucket_id = 'store-logos');
+create policy "store logos: sahibi yukler" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'store-logos'
+    and exists (
+      select 1 from public.stores s
+      where s.id = ((storage.foldername(name))[1])::uuid
+        and s.owner_id = (select auth.uid())
+    )
+  );
+create policy "store logos: sahibi veya admin siler" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'store-logos'
+    and (
+      public.is_admin()
+      or exists (
+        select 1 from public.stores s
+        where s.id = ((storage.foldername(name))[1])::uuid
+          and s.owner_id = (select auth.uid())
+      )
+    )
+  );
 
 create policy "product photos: herkes gorur" on storage.objects
   for select to anon, authenticated using (bucket_id = 'product-photos');

@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase'
 import type { BasketItem } from '../lib/basket'
 import type { PriceListing, Product } from '../lib/types'
 import { PageSkeleton } from '../components/PageSkeleton'
+import { OfflineDataNotice } from '../components/OfflineDataNotice'
+import { cacheProducts, readPublicCache, readPublicCaches, withRequestTimeout, writePublicCache } from '../lib/publicCache'
 
 type BasketProduct = Product & { listings: PriceListing[] }
 
@@ -13,19 +15,87 @@ export function BasketPage({ basket, onBasketChange }: {
   onBasketChange: (basket: BasketItem[]) => void
 }) {
   const [products, setProducts] = useState<BasketProduct[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const basketIds = basket.map((item) => item.productId).join(',')
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  const basketIds = basket.map((item) => item.productId).sort().join(',')
 
   useEffect(() => {
     if (!basketIds) {
       setProducts([])
       setLoading(false)
       setError(false)
+      setFetchedAt(null)
       return
     }
+    const ids = basketIds.split(',')
+    const cacheSuffix = ids.join(',')
+    const cachedProducts = readPublicCache<Product[]>(`products:basket:${cacheSuffix}`)
+    const cachedListings = readPublicCache<PriceListing[]>(`price-list:basket:${cacheSuffix}`)
+    let cachedData: BasketProduct[] | null = cachedProducts && cachedListings
+      ? cachedProducts.data.map((product) => ({
+          ...product,
+          listings: cachedListings.data.filter((listing) => listing.product_id === product.id && listing.in_stock),
+        }))
+      : null
+    let cacheFetchedAt = cachedProducts && cachedListings
+      ? Math.min(cachedProducts.fetchedAt, cachedListings.fetchedAt)
+      : null
+
+    if (!cachedData) {
+      const perProduct = ids.map((id) => ({
+        product: readPublicCache<Product>(`products:id:${id}`),
+        listings: readPublicCache<PriceListing[]>(`price-list:product:${id}`),
+      }))
+      if (perProduct.every((entry) => entry.product && entry.listings)) {
+        cachedData = perProduct.flatMap((entry) => entry.product ? [{
+          ...entry.product.data,
+          listings: (entry.listings?.data ?? []).filter((listing) => listing.in_stock),
+        }] : [])
+        cacheFetchedAt = Math.min(...perProduct.flatMap((entry) => [entry.product?.fetchedAt ?? Date.now(), entry.listings?.fetchedAt ?? Date.now()]))
+      }
+    }
+    if (!cachedData) {
+      const storePriceEntries = readPublicCaches<PriceListing[]>('price-list:store:')
+      const fallback = ids.map((id) => {
+        const productEntry = readPublicCache<Product>(`products:id:${id}`)
+        const listingEntry = readPublicCache<PriceListing[]>(`price-list:product:${id}`)
+        const storeListings = storePriceEntries
+          .flatMap((entry) => entry.data)
+          .filter((listing) => listing.product_id === id)
+        const listings = listingEntry?.data ?? storeListings
+        const fromListing = listings[0]
+        const product = productEntry?.data ?? (fromListing
+          ? { id, name_tk: fromListing.product_name, unit: fromListing.unit }
+          : null)
+        if (!product || (!listingEntry && storeListings.length === 0)) return null
+        const fetchedAtValues = [
+          productEntry?.fetchedAt,
+          listingEntry?.fetchedAt,
+          ...storePriceEntries
+            .filter((entry) => entry.data.some((listing) => listing.product_id === id))
+            .map((entry) => entry.fetchedAt),
+        ].filter((value): value is number => value !== undefined)
+        return {
+          product: { ...product, listings: listings.filter((listing) => listing.in_stock) },
+          fetchedAt: Math.min(...fetchedAtValues),
+        }
+      })
+      if (fallback.every((entry) => entry !== null)) {
+        cachedData = fallback.map((entry) => entry.product)
+        cacheFetchedAt = Math.min(...fallback.map((entry) => entry.fetchedAt))
+      }
+    }
+    if (cachedData) {
+      setProducts(cachedData)
+      setFetchedAt(cacheFetchedAt)
+      setLoading(false)
+      setError(false)
+    } else {
+      setLoading(true)
+    }
     if (!supabase) {
-      setError(true)
+      setError(!cachedData)
       setLoading(false)
       return
     }
@@ -33,29 +103,37 @@ export function BasketPage({ basket, onBasketChange }: {
     const client = supabase
     let active = true
     const loadBasketProducts = async () => {
-      setLoading(true)
-      setError(false)
-      const ids = basketIds.split(',')
-      const [productResult, priceResult] = await Promise.all([
-        client.from('products').select('id, name_tk, unit').in('id', ids),
-        client.from('price_list')
-          .select('price_id, store_id, price, in_stock, photo_paths, updated_at, store_name, product_id, product_name, unit')
-          .in('product_id', ids)
-          .eq('in_stock', true)
-          .order('price', { ascending: true }),
-      ])
-      if (!active) return
-      if (productResult.error || priceResult.error) {
-        setError(true)
+      try {
+        const [productResult, priceResult] = await withRequestTimeout(() => Promise.all([
+          client.from('products').select('id, name_tk, unit').in('id', ids),
+          client.from('price_list')
+            .select('price_id, store_id, price, in_stock, photo_paths, updated_at, store_name, store_logo_path, store_serial_no, product_id, product_name, unit')
+            .in('product_id', ids)
+            .eq('in_stock', true)
+            .order('price', { ascending: true }),
+        ]))
+        if (productResult.error) throw productResult.error
+        if (priceResult.error) throw priceResult.error
+        if (!active) return
+
+        const productRows = (productResult.data ?? []) as Product[]
+        const listings = (priceResult.data ?? []) as PriceListing[]
+        const nextProducts = productRows.map((product) => ({
+          ...product,
+          listings: listings.filter((listing) => listing.product_id === product.id),
+        }))
+        writePublicCache(`products:basket:${cacheSuffix}`, productRows)
+        writePublicCache(`price-list:basket:${cacheSuffix}`, listings)
+        cacheProducts(productRows)
+        setProducts(nextProducts)
+        setFetchedAt(null)
+        setError(false)
         setLoading(false)
-        return
+      } catch {
+        if (!active) return
+        setError(!cachedData)
+        setLoading(false)
       }
-      const listings = (priceResult.data ?? []) as PriceListing[]
-      setProducts(((productResult.data ?? []) as Product[]).map((product) => ({
-        ...product,
-        listings: listings.filter((listing) => listing.product_id === product.id),
-      })))
-      setLoading(false)
     }
     void loadBasketProducts()
     return () => { active = false }
@@ -103,6 +181,7 @@ export function BasketPage({ basket, onBasketChange }: {
 
   return (
     <section className="mt-5 space-y-6">
+      <OfflineDataNotice fetchedAt={fetchedAt} />
       <div className="flex justify-end">
         <button type="button" onClick={() => onBasketChange([])} className="min-h-11 text-sm font-semibold text-red-700">{tk.basket.clear}</button>
       </div>

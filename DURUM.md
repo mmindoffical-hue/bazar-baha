@@ -1,127 +1,71 @@
 # Bazar Baha - Durum Notu
 
-Değerlendirme: 2026-10-10. Yerel build ve tarayıcı denemesi yapıldı; tarayıcı kategori verilerini Supabase'den alabildi. Admin CRUD işlemleri giriş gerektirdiğinden canlı yazma akışı denenmedi.
+Değerlendirme: 2026-10-15. Adım 10A ve Adım 11 uygulandı; `npm run build` başarılı. Vite büyük ana JavaScript chunk için uyarı verdi. Adım 11 kapsamında canlı Supabase'e SQL veya veri yazma isteği gönderilmedi. Tarayıcı açılmadı. Önceki kullanıcı tarafından düzenlenen bu not dosyasının kapsam dışı içeriği korunarak güncellendi.
 
 ## Bitenler
 
-- E-posta/şifre ile kayıt, giriş, çıkış ve oturum/rol okuma kodu mevcut.
-- Kategoriler, ürün arama ve ürün fiyat listesi mevcut. Tarayıcıda arama ve kategori → ürün akışı çalıştı; aramayla açılan `Hyýar` için test mağazasının fiyatı görüntülendi. Kategori yolunda açılan `Pomidor` için fiyat kaydı yoktu. Son tekrar denemesinde Supabase isteği `ERR_INTERNET_DISCONNECTED` ile başarısız oldu; bu nedenle fiyatı olan ürüne kategori yoluyla erişim yeniden doğrulanamadı.
-- Dükkân başvurusu, vitrin fotoğrafı, konum koordinatı alma ve admin `set_store_status` onay/askıya alma akışları kodlanmış.
-- Vitrin fotoğrafını sonradan değiştirme yarım: uygulama aynı Storage nesnesine `upsert: true` kullanıyor, ancak yerel şemada `store-photos` için UPDATE politikası yok.
-- Onaylı dükkân fiyat/stok yönetimi ile ürün başına 1-2 fotoğraf yükleme, küçültme ve küçük görsel üretme kodlanmış.
-- Sepet localStorage'da tutuluyor; miktar, silme ve toplam hesaplama mevcut. Tarayıcıda üç ürün ekleme, ortadakini/ilkini/sonuncusunu silme ve yenileme denendi. Boş sepet doğru açıldı; sepet senaryosunda `qty` çökmesi veya Console/page error görülmedi. Daha sonraki kategori isteğinde Console'a `ERR_INTERNET_DISCONNECTED` kaydedildi.
-- Yanlış fiyat bildirimi, oturumsuz kullanıcıya giriş uyarısı ve admin şikâyet paneli kodlanmış. Girişsiz uyarı tarayıcıda doğrulandı; bildirim gönderimi/admin işlemleri giriş gerektirdiğinden denenmedi.
-- Admin katalog yönetimi eklendi: yalnızca admin rolünde sekme görünür; kategori ekleme/düzenleme, kategoriye göre ürün listeleme ve ürün ekleme/düzenleme/silme, 23505 için Türkmence uyarı, 50'lik toplu ekleme ve cascade silme öncesi fiyat sayımı uygulanmış. Fiyatlara bağlı tam boy/thumbnail suratlary `product-photos` içinden silinir; Storage hataları yalnızca `console.warn` üretir. RLS ve `schema.sql` değiştirilmedi.
-- `npm run build` bu değişikliklerden sonra başarılı; Vite büyük chunk uyarısı sürüyor. Tarayıcıda ana sayfa açıldı ve Supabase'den kategori sanawy geldi; Profil'de giriş formu görüntülendi. Admin oturumu olmadığı için Katalog sekmesinin admin görünümü ve CRUD işlemleri tarayıcıda uçtan uca denenmedi. VPN'in açık olup olmadığı araçtan doğrulanamadı.
-- Fotoğraf görüntüleyici tam ekran açıldı ve mevcut tek fotoğraf yüklendi. İki fotoğraflı/kaydırmalı durum canlı kayıtta yoktu; dokunmatik kaydırma kodu da bulunmuyor.
-- `npm run build` başarılı. Büyük JavaScript chunk boyutu için Vite uyarısı verdi.
-- `npm run dev` çalışıyor: http://127.0.0.1:5174/ (5173 kullanımdaydı).
+- E-posta/şifre kayıt, giriş/çıkış, oturum ve `profiles.role` okuma akışları kodda mevcut.
+- Kategori, arama, ürün fiyat listesi ve yenileme akışları mevcut. 2026-10-10 tarayıcı denemesinde arama ve kategori → ürün çalıştı; `Hyýar` için fiyat görüldü. Daha sonraki Supabase isteği `ERR_INTERNET_DISCONNECTED` verdi; bu nedenle fiyatı olan ürünün kategori yolundaki görüntüsü tekrar doğrulanmadı.
+- Dükkân başvuru/düzenleme formunda küçük Leaflet haritası, sürüklenebilir marker, cihaz konumunu kullanma ve isteğe bağlı logo yükleme mevcut. Yeni başvuruda konum zorunlu; eski konumsuz dükkânda uyarı gösterilir.
+- Admin `set_store_status` onay/askıya alma akışı mevcut; onay RPC'si seri numarasını otomatik atar. Admin listesinde seri numarası ve seri numarasıyla dükkân araması kodlandı.
+- Onaylı dükkân için fiyat/stok ekleme, düzenleme ve silme; en fazla iki ürün fotoğrafı yükleme, sıkıştırma ve thumbnail üretme kodda mevcut.
+- Sepet `localStorage` ile saklanıyor; miktar değiştirme, silme, en ucuz fiyat ve mağaza toplamı hesaplamaları kodda mevcut. 2026-10-10 tarayıcı denemesinde sepet ekleme/silme/yenileme ve boş sepet kontrol edildi; çökme görülmedi.
+- Yanlış fiyat bildirimi ve admin şikâyet paneli mevcut. Girişsiz bildirim uyarısı tarayıcıda görüldü.
+- Admin kataloğunda kategori ekleme/düzenleme; ürün ekleme/düzenleme/silme; kategori filtresi, 50'lik toplu ekleme ve yinelenen kayıt uyarısı kodda mevcut. Ürün silme öncesi ilişkili fiyatları sayıyor, sonrasında ilişkili tam boy ve thumbnail görsellerini temizlemeyi deniyor.
+- OSM haritası alt gezinmeye eklendi; onaylı ve konumlu dükkânlar cluster marker'larıyla gösterilir. Ürün sayfasından fiyat rozetli ve en ucuzu renkle ayrılmış ürün haritası açılır. Dükkân detayında fiyat, güncellenme zamanı, "Köne maglumat" etiketi, küçük fotoğraf ve sepete ekleme bulunur.
+- Harita ekranı ve konum seçici `React.lazy` ile yüklenir. OSM karo hatası/çevrimdışı durumu için Türkmence uyarı vardır; harita sorgusu telefon ve owner_id alanlarını seçmez.
+- Yerel tarayıcıda OSM karoları, mevcut test dükkânı/seri numarası, ürün fiyatlı marker, dükkân ürün listesi ve sepete ekleme doğrulandı. Çevrimdışı simülasyonda harita interneti uyarısı göründü.
+- `npm run build` bu oturumda başarılı; Leaflet ve harita ekranları ayrı chunk'lara çıktı. Vite'ın ana JavaScript chunk uyarısı sürüyor.
+- Herkese açık kategoriler, kategori/arama ürünleri, ürün ve dükkân fiyat listeleri, harita dükkânları ve ürün haritası `key`/`data`/`fetchedAt` alanlarıyla `localStorage`'da cache-first yenilenir; Supabase okuma hatasında veya 10 saniyelik zaman aşımında mevcut cache gösterilir. Fiyat listesi cache'i 50 kayıtla sınırlıdır.
+- Cache'den gösterilen alıcı verisinde `tk.ts` içindeki Türkmence çevrimdışı şeridi görünür, sunucu verisi yenilenince kaybolur. Sepet yerel sepet öğelerini kullanır, katalog ve fiyat cache'lerinden çevrimdışı fiyat hesaplar.
+- Oturum açan kullanıcının profil rolü kullanıcı kimliğiyle `localStorage`'a kaydedilir; başlangıçta cache kullanılır ve `profiles.role` arka planda doğrulanır. Oturum/profil yönetim dışındaki özel veriler ve yazma akışları public cache'e alınmaz.
+- Service worker uygulama build dosyalarını precache eder; `product-photos` içindeki `-t.jpg` küçük kopyalarını en fazla 200, OSM karolarını en fazla 300 kayıt ve 7 gün CacheFirst ile saklar. Supabase API uçları NetworkOnly'dir. Yeni sürümde Türkmence “Täze wersiýa bar” bildirimi ve “Täzele” düğmesi çıkar.
 
 ## Yarım Kalanlar
 
 | Özellik | Durum | Kanıt / sınır |
 |---|---|---|
-| Giriş/kayıt | var | Kod mevcut; gerçek kullanıcıyla kimlik doğrulama denenmedi. |
-| Dükkân başvurusu ve admin onayı | var | Form ve RPC çağrısı mevcut; gerçek admin oturumuyla uçtan uca denenmedi. |
-| Vitrin fotoğrafını değiştirme | yarım | Kod `upsert: true` kullanıyor; `schema.sql` `store-photos` UPDATE politikasını tanımlamıyor. |
-| Fiyat girme/stok | var | Onaylı dükkân bileşeni mevcut; gerçek kullanıcıyla yazma denenmedi. |
-| Ürün fotoğrafı 1-2 adet | var | En fazla iki tam görsel ve thumbnail kodu mevcut; yükleme akışı kimlik doğrulama gerektiriyor. |
-| Sepet | var | Ekleme, sırayla silme ve yenileme tarayıcıda denendi; çökmeye rastlanmadı. |
-| Yanlış fiyat bildirimi | var | Girişsiz uyarı denendi; gönderme için kullanıcı girişi gerekli. |
-| Admin şikâyet paneli | var | Kod mevcut; admin oturumuyla denenmedi. |
-| Gözleg / kategori / fiyat listesi | kısmen geçti | Arama ve kategori → ürün çalıştı; fiyatlı `Hyýar` aramayla açıldı. Kategori yolundaki `Pomidor` fiyat listesi boştu; fiyatlı ürünü kategori yoluyla yeniden deneme bağlantı hatası nedeniyle yapılamadı. |
-| Fotoğraf görüntüleyici | yarım | Tam ekran tek fotoğraf açılıyor. İki fotoğraf için ok/klavye kontrolleri kodlu; dokunmatik swipe ve iki fotoğraflı kayıt doğrulanmadı. |
-| Harita | eksik | Leaflet/OSM ekranı yok; yalnızca dükkân formunda tarayıcı konumunu koordinat olarak alma var. |
-| Admin ürün kataloğu yönetimi | kodlandı, yetkili uçtan uca test edilmedi | Admin sekmesi kategori/ürün CRUD, kategori filtresi, 50'lik toplu ekleme, 23505 uyarısı ve fotoğraflı cascade silmeyi kapsar. Admin girişi olmadığı için tarayıcıda canlı yazma/silme doğrulanmadı. |
-| Çevrimdışı fiyat verisi | eksik | PWA statik uygulama dosyalarını önbellekliyor; Supabase fiyatları için çevrimdışı/eski veri önbelleği görünmüyor. |
-| Canlı Supabase şema durumu | doğrulanamadı | Uzak veritabanına erişilmedi; aşağıdaki SQL'in canlıda uygulanıp uygulanmadığı bilinmiyor. |
+| Vitrin fotoğrafını değiştirme | Kod ve canlı politika bildirimi var; kaynak şema eksik | Kod aynı Storage yoluna `upsert: true` ile yükler. Kullanıcı canlı `store-photos` UPDATE kuralının uygulandığını bildirdi; yerel `schema.sql` bu kuralı içermiyor. |
+| Girişli mağaza akışları | Elle test bekliyor | Başvuru/onay, fiyat yazma ve fotoğraf işlemleri gerçek kullanıcı/admin oturumuyla uçtan uca doğrulanmadı. |
+| Yanlış fiyat bildirimi ve admin işlemleri | Elle test bekliyor | Gönderim, admin rapor inceleme/kapatma ve askıya alma gerçek hesaplarla doğrulanmadı. |
+| Admin katalog yazma/silme | Elle test bekliyor | CRUD, toplu ekleme ve Storage fotoğraf temizliği yetkili oturumla canlıda denenmedi. Storage silme hataları yalnızca `console.warn` üretir. |
+| İki fotoğraflı görüntüleyici | Kısmen tamam | Ok ve klavye kontrolleri kodda; iki fotoğraflı gerçek kayıt ve mobil davranış denenmedi. Dokunmatik kaydırma kodu yok. |
+| Harita ve konum seçme | Masaüstünde kısmen tarayıcıda doğrulandı; telefon testi bekliyor | OSM karoları ve tek marker çalıştı; VPN'in açık olduğu bağımsız doğrulanmadı. Yüzlerce marker, cluster davranışı, mobil dokunma ve oturumlu konum seçme denenmedi. |
+| Logo ve seri numarası | Kodlandı; canlı akış elle doğrulanmalı | Kaynak şeması `schema.sql` içinde; logo yükleme, RPC seri no ataması, eski logo silme ve admin seri araması yetkili Supabase hesabıyla uçtan uca denenmedi. |
+| Adım 11 çevrimdışı/yavaş internet | Kodlandı; çevrimdışı elle test bekliyor | `localStorage` cache-first, 10 saniyelik istek sınırı, rol cache'i, PWA runtime cache ve sürüm bildirimi uygulandı; tarayıcı/telefon çevrimdışı testi bu oturumda özellikle yapılmadı. |
 
-Realtime, `PROJE.md`'de belirtildiği üzere bu sürümde özellikle atlanmış.
+Realtime bu sürümde özellikle kapsam dışında bırakılmıştır (`PROJE.md`).
 
-## Canlı Supabase'de Çalıştırılacak SQL'ler
+## Canlı Supabase Durumu
 
-Canlı veritabanı incelenemedi. Yerel şemadaki commit farkı, `prices` okuma politikasında admin'e askıya alınmış dükkânların fiyatlarını da okuma izni verilmesi; ayrıca kod ile şema arasında `store-photos` UPDATE Storage politikasının eksik olmasıdır. İlki admin şikâyet panelinin askıya alınmış dükkân fiyatını görmesini sağlar; ikincisi vitrin fotoğrafını değiştirmeyi mümkün kılar. Canlı durum doğrulanmadı. Tam `schema.sql` dosyasını tekrar çalıştırmayın.
+Kullanıcı bildirimi: canlıda aşağıdaki üç kural uygulandı ve şema kontrolündeki altı madde `true` çıktı:
 
-```sql
-begin;
+- `prices` okuma kuralı admin'in askıya alınmış dükkân fiyatlarını da okuyabilmesini sağlıyor.
+- `store-photos` için dükkân sahibinin mevcut vitrin fotoğrafını güncelleme kuralı uygulandı.
+- `product-photos` için admin silme kuralı uygulandı.
 
-drop policy if exists "prices: onayli dukkanlarin fiyatlari herkese" on public.prices;
+Bu bilgiler canlıya bu oturumdan bağlanılarak bağımsız doğrulanmadı. Bu üç SQL artık çalıştırılacaklar listesinde değildir; yeniden çalıştırmayın. Yerel `schema.sql`, `prices` admin okuma ve `product-photos` admin silme kurallarını içeriyor; `store-photos` UPDATE kuralı ise hâlâ eksik. Bu konu Adım 10A kapsamı dışındadır. Tam `schema.sql` dosyasını canlıda tekrar çalıştırmayın.
 
-create policy "prices: onayli dukkanlarin fiyatlari herkese" on public.prices
-  for select to anon, authenticated
-  using (
-    public.is_admin()
-    or exists (
-      select 1
-      from public.stores s
-      where s.id = store_id
-        and s.status = 'approved'
-    )
-  );
+Kullanıcı bildirimi: Adım 10A alanları (`stores.logo_path`, `stores.serial_no`, herkese açık `store-logos` bucket'ı ve `price_list.store_logo_path`/`store_serial_no`) canlıda zaten uygulanmıştır. Bu oturumda canlıya SQL veya yazma isteği gönderilmedi; tarayıcı denemesinde yalnızca uygulamanın normal okuma sorguları kullanıldı. Yeni alanlar, bucket, izinler ve onay RPC'sinin seri ataması yalnız yerel `schema.sql`'e işlendi. Tam `schema.sql` dosyasını canlıda çalıştırmayın.
 
-commit;
-```
-
-Vitrin fotoğrafı güncellemesi için yerel şemada eksik olan UPDATE politikası:
-
-```sql
-begin;
-
-drop policy if exists "photos: sahibi gunceller" on storage.objects;
-
-create policy "photos: sahibi gunceller" on storage.objects
-  for update to authenticated
-  using (
-    bucket_id = 'store-photos'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-  )
-  with check (
-    bucket_id = 'store-photos'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-  );
-
-commit;
-```
-
-Bu SQL değişiklikleri yalnızca kendi testinden sonra uygulanmalıdır. Canlıda eşdeğer politikalar olup olmadığı bu oturumda doğrulanmadı.
-
-Admin katalog ürünü silerken `product-photos` nesnelerini temizleyebilmesi için ek gereken Storage politikası (kategori/ürün tablo RLS politikalarını değiştirmez):
-
-```sql
-begin;
-
-drop policy if exists "product photos: onayli dukkan siler" on storage.objects;
-
-create policy "product photos: onayli dukkan siler" on storage.objects
-  for delete to authenticated
-  using (
-    bucket_id = 'product-photos'
-    and (
-      public.is_admin()
-      or public.owns_approved_store(((storage.foldername(name))[1])::uuid)
-    )
-  );
-
-commit;
-```
-
-Kodun beklediği veritabanı yüzeyi: `profiles`, `stores`, `categories`, `products`, `prices`, `reports`; `price_list` görünümü; `set_store_status(p_store, p_status)` RPC'si; `product-photos` ve `store-photos` Storage bucket'ları. İlgili sütunlar yerel şemayla eşleşiyor. Kod doğrudan `store-videos` kullanmıyor. Tablolarda RLS etkin; başvuru, onaylı dükkân fiyat yazma, kullanıcının kendi raporunu ekleme ve admin rapor görme/silme kuralları şemada tanımlı. Canlı tablo/politika/bucket/RPC varlığı doğrulanmadı.
+Uygulamanın kullandığı yüzey: `profiles`, `stores`, `categories`, `products`, `prices`, `reports`; `price_list` görünümü; `set_store_status(p_store, p_status)` RPC'si; `product-photos`, `store-photos` ve `store-logos` bucket'ları.
 
 ## Kullanıcının Elle Test Etmesi Gerekenler
 
-1. Kendi hesabıyla giriş/kayıt ve çıkışı deneyin; parola veya gizli bilgiyi sohbete göndermeyin.
-2. Admin hesabıyla bekleyen dükkânı onaylayın; dükkân hesabıyla fiyat ve bir/iki fotoğraf yükleyip alıcı ekranında göründüğünü kontrol edin.
-3. Girişli normal kullanıcıyla yanlış fiyat bildirimi gönderin; admin hesabında raporu açıp kapatın ve dükkânı askıya alma davranışını kontrol edin.
-4. İki fotoğraflı gerçek bir fiyat kaydıyla telefonda görüntüleyiciyi deneyin. Mevcut kodda dokunmatik kaydırma uygulanmış değil; yalnızca ok düğmeleri/klavye kontrolleri var.
-5. Dükkân başvurusunda konum iznini verip koordinatların kaydedildiğini doğrulayın. Bu akış harita göstermez.
-6. Vitrin fotoğrafını ilk yüklemeden sonra değiştirip tekrar kaydetmeyi deneyin; Storage UPDATE politikası eksikse migration uygulanmadan bu işlem başarısız olabilir.
+1. Kendi hesabınızla kayıt, giriş ve çıkışı deneyin; parola veya gizli bilgiyi sohbete göndermeyin.
+2. Dükkân hesabıyla başvuru yapın; admin hesabıyla onaylayın. Dükkân hesabıyla fiyat/stok ve bir ya da iki ürün fotoğrafı ekleyin; alıcı ekranındaki görünümü ve mevcut vitrin fotoğrafını değiştirmeyi doğrulayın.
+3. Girişli normal kullanıcıyla yanlış fiyat bildirimi gönderin. Admin hesabında raporu açıp kapatın; askıya alınmış dükkân fiyatının rapor bağlamında okunabildiğini kontrol edin.
+4. Admin kataloğunda kategori/ürün ekleme-düzenleme, yinelenen kayıt, toplu ekleme ve fotoğraflı ürün silmeyi deneyin; Storage nesnelerinin silindiğini ayrıca kontrol edin.
+5. VPN açıkken yerel uygulamada OSM tile'larını, fitBounds/cluster davranışını ve ürünün fiyat rozetli haritasını kontrol edin. Gerçek hesapla yeni başvuruda koordinat/logoyu, admin onayında seri numarasını ve seri aramasını, dükkân düzenlemesinde eski logo değişimini deneyin.
+6. Telefonda harita dokunma/sürükleme, yol tarifi bağlantısı, logo boyutu ve ürünleri sepete ekleme akışlarını doğrulayın.
+7. Bir kez çevrimiçiyken kategori, arama, ürün fiyatı, harita ve sepeti yükleyin; sonra interneti kapatıp tekrar açın. Cache şeridini, eski fiyatları ve çevrimdışı sepet toplamını; internet gelince şeridin kalkmasını kontrol edin. Yeni service worker sürümü için bildirimin ve “Täzele” düğmesinin davranışını ayrıca deneyin.
 
 ## Sıradaki 3 İş
 
-1. Canlı şema sürümünü doğrulayın; gerekiyorsa yukarıdaki iki RLS migration'ını önce test projesinde, sonra canlıda uygulayın.
-2. Leaflet/OSM haritasını tamamlayın.
-3. Admin hesabıyla katalog ekleme/düzenleme/toplu ekleme/silme işlemlerini ve cascade fotoğraf temizliğini test edin; iki fotoğraflı görüntüleyiciye mobil swipe ekleyin ve diğer gerçek girişli mağaza/fiyat/rapor akışlarını uçtan uca test edin.
+1. Adım 11'in çevrimiçi/çevrimdışı geçiş ve PWA güncelleme akışını telefonda elle doğrulayın.
+2. Adım 10A'nın gerçek mağaza sahibi/admin hesaplarıyla canlı uçtan uca denemesini yapın; canlı SQL çalıştırmayın.
+3. Haritayı VPN açıkken ve mobil cihazda test edin; OSM karoları ve marker kümelenmesini yüzlerce kayıtla doğrulayın. Önceki yönetim akışlarının yetkili hesap testlerini de tamamlayın.
 
 ## Git Notu
 
-Son commit `bd0c83d` (`Video yerine fotograf`). İnceleme sırasında çalışma ağacı zaten kirliydi; bu değişiklikler korunmuştur. `PROJE.md`'ye dokunulmadı. `DURUM.md` bu oturumda eklendi.
+Adım 10A ve Adım 11 kapsamında uygulama, npm bağımlılıkları, yerel `schema.sql`, `PROJE.md` ve bu durum notu değiştirildi. Önceden var olan `DURUM.md` kullanıcı düzenlemeleri korunup güncel durumla birleştirildi. Adım 11 sırasında canlıda SQL çalıştırılmadı veya veri yazılmadı.

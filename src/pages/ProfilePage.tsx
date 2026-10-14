@@ -57,7 +57,7 @@ export function ProfilePage({ visible }: { visible: boolean }) {
           <p className="text-sm text-stone-500">{tk.auth.email}</p>
           <p className="mt-1 break-all font-medium text-stone-900">{user.email}</p>
         </div>
-        <StoreProfile userId={user.id} role={role} />
+        <StoreProfile userId={user.id} role={role} visible={visible} />
         <button
           type="button"
           onClick={handleSignOut}

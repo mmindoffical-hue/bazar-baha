@@ -4,6 +4,10 @@ import { tk } from '../i18n/tk'
 import { supabase } from '../lib/supabase'
 import type { Category, Product } from '../lib/types'
 import { PageSkeleton } from '../components/PageSkeleton'
+import { OfflineDataNotice } from '../components/OfflineDataNotice'
+import { cacheProducts, readPublicCache, withRequestTimeout, writePublicCache } from '../lib/publicCache'
+
+const categoriesCacheKey = 'categories'
 
 export function HomePage({ active, visible, selectedCategory, onSelectCategory, onSelectProduct }: {
   active: boolean
@@ -18,23 +22,44 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
   const [productsLoading, setProductsLoading] = useState(false)
   const [categoriesError, setCategoriesError] = useState(false)
   const [productsError, setProductsError] = useState(false)
+  const [categoriesFetchedAt, setCategoriesFetchedAt] = useState<number | null>(null)
+  const [productsFetchedAt, setProductsFetchedAt] = useState<number | null>(null)
 
   useEffect(() => {
+    const cached = readPublicCache<Category[]>(categoriesCacheKey)
+    if (cached) {
+      setCategories(cached.data)
+      setCategoriesFetchedAt(cached.fetchedAt)
+      setCategoriesLoading(false)
+      setCategoriesError(false)
+    } else {
+      setCategoriesLoading(true)
+    }
     if (!supabase) {
-      setCategoriesError(true)
+      setCategoriesError(!cached)
       setCategoriesLoading(false)
       return
     }
 
+    const client = supabase
     let mounted = true
-    void supabase
-      .from('categories')
-      .select('id, name_tk')
-      .order('name_tk')
-      .then(({ data, error: requestError }) => {
+    void withRequestTimeout(async () => {
+      const { data, error: requestError } = await client
+        .from('categories')
+        .select('id, name_tk')
+        .order('name_tk')
+      if (requestError) throw requestError
+      return data ?? []
+    }).then((data) => {
         if (!mounted) return
-        setCategories(data ?? [])
-        setCategoriesError(Boolean(requestError))
+        writePublicCache(categoriesCacheKey, data)
+        setCategories(data)
+        setCategoriesFetchedAt(null)
+        setCategoriesError(false)
+        setCategoriesLoading(false)
+      }).catch(() => {
+        if (!mounted) return
+        setCategoriesError(!cached)
         setCategoriesLoading(false)
       })
 
@@ -46,24 +71,47 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
       setProducts([])
       setProductsError(false)
       setProductsLoading(false)
+      setProductsFetchedAt(null)
       return
     }
+    const cacheKey = `products:category:${selectedCategory.id}`
+    const cached = readPublicCache<Product[]>(cacheKey)
+    if (cached) {
+      setProducts(cached.data)
+      setProductsFetchedAt(cached.fetchedAt)
+      setProductsLoading(false)
+      setProductsError(false)
+    } else {
+      setProductsLoading(true)
+    }
     if (!supabase) {
-      setProductsError(true)
+      setProductsError(!cached)
       setProductsLoading(false)
       return
     }
 
+    const client = supabase
     let mounted = true
-    setProductsLoading(true)
     setProductsError(false)
-    void supabase.from('products').select('id, name_tk, unit')
-      .eq('category_id', selectedCategory.id)
-      .order('name_tk')
-      .then(({ data, error: requestError }) => {
+    void withRequestTimeout(async () => {
+      const { data, error: requestError } = await client
+        .from('products')
+        .select('id, name_tk, unit')
+        .eq('category_id', selectedCategory.id)
+        .order('name_tk')
+      if (requestError) throw requestError
+      return data ?? []
+    }).then((data) => {
         if (!mounted) return
-        setProducts(data ?? [])
-        setProductsError(Boolean(requestError))
+        writePublicCache(cacheKey, data)
+        cacheProducts(data)
+        setProducts(data)
+        setProductsFetchedAt(null)
+        setProductsError(false)
+        setProductsLoading(false)
+      }).catch(() => {
+        if (!mounted) return
+        setProductsError(!cached)
         setProductsLoading(false)
       })
 
@@ -73,7 +121,9 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
   return (
     <section hidden={!visible} className="mt-6">
       {selectedCategory ? (
-        productsLoading ? <PageSkeleton /> : productsError ? (
+        <>
+        <OfflineDataNotice fetchedAt={productsFetchedAt} />
+        {productsLoading && products.length === 0 ? <PageSkeleton /> : productsError ? (
           <p role="alert" className="mt-8 text-sm text-red-700">{tk.buyer.loadError}</p>
         ) : products.length === 0 ? (
           <p className="mt-8 text-center text-sm text-stone-500">{tk.buyer.empty}</p>
@@ -94,12 +144,15 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
             ))}
           </div>
         )
+        }
+        </>
       ) : categoriesLoading ? <PageSkeleton rows={6} /> : categoriesError ? (
         <p role="alert" className="mt-8 text-sm text-red-700">{tk.buyer.loadError}</p>
       ) : categories.length === 0 ? (
         <p className="mt-8 text-center text-sm text-stone-500">{tk.buyer.empty}</p>
       ) : (
         <>
+          <OfflineDataNotice fetchedAt={categoriesFetchedAt} />
           <h2 className="mb-2 text-sm font-semibold text-stone-500">{tk.buyer.categories}</h2>
           <div className="divide-y divide-stone-200">
             {categories.map((category) => (

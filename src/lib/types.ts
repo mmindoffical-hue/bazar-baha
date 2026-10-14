@@ -8,6 +8,8 @@ export type PriceListing = {
   photo_paths: string[]
   updated_at: string
   store_name: string
+  store_logo_path: string | null
+  store_serial_no: number | null
   product_id: string
   product_name: string
   unit: string
@@ -24,8 +26,11 @@ export type StoreRecord = {
   lat: number | null
   lng: number | null
   photo_path: string | null
+  logo_path: string | null
+  serial_no: number | null
   status: StoreStatus
 }
+export type StoreMapRecord = Pick<StoreRecord, 'id' | 'name' | 'city' | 'address' | 'lat' | 'lng' | 'logo_path' | 'serial_no'>
 export type StoreFields = {
   name: string
   phone: string
