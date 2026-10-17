@@ -182,7 +182,10 @@ yapay zekâya yapıştır.
 > önce gösterilsin, Supabase arka planda yenilensin; istekler 10 saniyede
 > zaman aşımına uğrasın ve hata/zaman aşımında eski veri gösterilsin.
 > Fiyat listesi önbelleği en fazla 50 kayıt tutsun. Önbellekten gösterilen
-> veri Türkmence çevrimdışı şeridi taşısın; yenilenince şerit kaybolsun.
+> veri için arka plan yenilemesi 3 saniye içinde başarısız olursa veya
+> `navigator.onLine` 2 saniye boyunca `false` kalırsa Türkmence çevrimdışı
+> şeridini göster. İstek sürerken ve sayfa geçişlerinde gösterme; göründükten
+> sonra en az 4 saniye tut ve başarılı yenilemede kaldır.
 > Oturum açan kullanıcının `profiles.role` değeri kullanıcı kimliğiyle
 > saklansın, açılışta kullanılsın ve arkadan doğrulansın. Oturum, profil,
 > yönetim, rapor, özel fotoğraf ve yazma istekleri önbelleğe alınmasın.

@@ -7,7 +7,11 @@ import { useAuth } from '../lib/AuthContext'
 import type { PriceListing } from '../lib/types'
 import { thumbnailPathFor } from '../lib/productPhotos'
 
-export function PriceRow({ listing, onOpenProfile }: { listing: PriceListing; onOpenProfile: () => void }) {
+export function PriceRow({ listing, cheapest = false, onOpenProfile }: {
+  listing: PriceListing
+  cheapest?: boolean
+  onOpenProfile: () => void
+}) {
   const isOld = Date.now() - new Date(listing.updated_at).getTime() > 24 * 60 * 60 * 1000
   const { user } = useAuth()
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
@@ -62,8 +66,9 @@ export function PriceRow({ listing, onOpenProfile }: { listing: PriceListing; on
 
   return (
     <article
-      className={`border-b border-stone-200 py-4 ${isOld ? 'bg-stone-50 text-stone-400' : 'text-stone-800'}`}
+      className={`border-b border-stone-200 py-4 ${cheapest ? 'rounded-md border-2 border-emerald-600 px-3' : ''} ${isOld ? 'bg-stone-50 text-stone-400' : 'text-stone-800'}`}
     >
+      {cheapest && <p className="mb-2 text-xs font-bold text-emerald-800">{tk.buyer.cheapest}</p>}
       <div className="flex items-start gap-3">
         <button
           type="button"

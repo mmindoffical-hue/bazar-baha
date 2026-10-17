@@ -20,6 +20,8 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
   const [products, setProducts] = useState<Product[]>([])
   const [categoriesLoading, setCategoriesLoading] = useState(true)
   const [productsLoading, setProductsLoading] = useState(false)
+  const [categoriesRefreshing, setCategoriesRefreshing] = useState(false)
+  const [productsRefreshing, setProductsRefreshing] = useState(false)
   const [categoriesError, setCategoriesError] = useState(false)
   const [productsError, setProductsError] = useState(false)
   const [categoriesFetchedAt, setCategoriesFetchedAt] = useState<number | null>(null)
@@ -29,7 +31,7 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
     const cached = readPublicCache<Category[]>(categoriesCacheKey)
     if (cached) {
       setCategories(cached.data)
-      setCategoriesFetchedAt(cached.fetchedAt)
+      setCategoriesFetchedAt(null)
       setCategoriesLoading(false)
       setCategoriesError(false)
     } else {
@@ -38,11 +40,15 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
     if (!supabase) {
       setCategoriesError(!cached)
       setCategoriesLoading(false)
+      setCategoriesRefreshing(false)
       return
     }
 
     const client = supabase
     let mounted = true
+    const startedAt = Date.now()
+    setCategoriesFetchedAt(null)
+    setCategoriesRefreshing(true)
     void withRequestTimeout(async () => {
       const { data, error: requestError } = await client
         .from('categories')
@@ -57,10 +63,13 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
         setCategoriesFetchedAt(null)
         setCategoriesError(false)
         setCategoriesLoading(false)
+        setCategoriesRefreshing(false)
       }).catch(() => {
         if (!mounted) return
+        setCategoriesFetchedAt(cached && Date.now() - startedAt <= 3000 ? cached.fetchedAt : null)
         setCategoriesError(!cached)
         setCategoriesLoading(false)
+        setCategoriesRefreshing(false)
       })
 
     return () => { mounted = false }
@@ -72,13 +81,14 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
       setProductsError(false)
       setProductsLoading(false)
       setProductsFetchedAt(null)
+      setProductsRefreshing(false)
       return
     }
     const cacheKey = `products:category:${selectedCategory.id}`
     const cached = readPublicCache<Product[]>(cacheKey)
     if (cached) {
       setProducts(cached.data)
-      setProductsFetchedAt(cached.fetchedAt)
+      setProductsFetchedAt(null)
       setProductsLoading(false)
       setProductsError(false)
     } else {
@@ -87,11 +97,15 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
     if (!supabase) {
       setProductsError(!cached)
       setProductsLoading(false)
+      setProductsRefreshing(false)
       return
     }
 
     const client = supabase
     let mounted = true
+    const startedAt = Date.now()
+    setProductsFetchedAt(null)
+    setProductsRefreshing(true)
     setProductsError(false)
     void withRequestTimeout(async () => {
       const { data, error: requestError } = await client
@@ -109,10 +123,13 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
         setProductsFetchedAt(null)
         setProductsError(false)
         setProductsLoading(false)
+        setProductsRefreshing(false)
       }).catch(() => {
         if (!mounted) return
+        setProductsFetchedAt(cached && Date.now() - startedAt <= 3000 ? cached.fetchedAt : null)
         setProductsError(!cached)
         setProductsLoading(false)
+        setProductsRefreshing(false)
       })
 
     return () => { mounted = false }
@@ -122,7 +139,7 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
     <section hidden={!visible} className="mt-6">
       {selectedCategory ? (
         <>
-        <OfflineDataNotice fetchedAt={productsFetchedAt} />
+        <OfflineDataNotice fetchedAt={productsFetchedAt} refreshing={productsRefreshing} active={active && visible} />
         {productsLoading && products.length === 0 ? <PageSkeleton /> : productsError ? (
           <p role="alert" className="mt-8 text-sm text-red-700">{tk.buyer.loadError}</p>
         ) : products.length === 0 ? (
@@ -152,7 +169,7 @@ export function HomePage({ active, visible, selectedCategory, onSelectCategory, 
         <p className="mt-8 text-center text-sm text-stone-500">{tk.buyer.empty}</p>
       ) : (
         <>
-          <OfflineDataNotice fetchedAt={categoriesFetchedAt} />
+          <OfflineDataNotice fetchedAt={categoriesFetchedAt} refreshing={categoriesRefreshing} active={active && visible} />
           <h2 className="mb-2 text-sm font-semibold text-stone-500">{tk.buyer.categories}</h2>
           <div className="divide-y divide-stone-200">
             {categories.map((category) => (

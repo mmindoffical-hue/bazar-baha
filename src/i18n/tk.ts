@@ -53,6 +53,7 @@ export const tk = {
     mapLoading: 'Karta maglumatlary alynýar...',
     mapLoadError: 'Dükanlaryň kartadaky maglumatlaryny almak başartmady.',
     mapNoStores: 'Kartada görkezmäge dükan ýok.',
+    locationMissing: (count: number) => `${count} dükan: Konum ýok`,
     appUpdateAvailable: 'Täze wersiýa bar',
     updateApp: 'Täzele',
     zoomIn: 'Ýakynlaşdyr',

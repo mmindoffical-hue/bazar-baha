@@ -19,7 +19,7 @@ type StorePriceRow = {
   store_id: string
   price: number
   in_stock: boolean
-  photo_paths: string[]
+  photo_paths: string[] | null
   updated_at: string
   store_name: string
   store_logo_path: string | null
@@ -28,17 +28,26 @@ type StorePriceRow = {
   product_name: string
   unit: string
 }
-type MapData = { pins: MapPin[]; prices: StorePriceRow[] }
+type MapData = { pins: MapPin[]; prices: StorePriceRow[]; missingLocationCount: number }
+
+function hasLocation(store: StoreMapRecord): store is StoreMapRecord & { lat: number; lng: number } {
+  return typeof store.lat === 'number' && Number.isFinite(store.lat)
+    && typeof store.lng === 'number' && Number.isFinite(store.lng)
+}
 
 function mapProductPrices(listings: StorePriceRow[], stores: StoreMapRecord[]): MapData {
   const storesById = new Map(stores.map((store) => [store.id, store]))
   const prices = listings.filter((item) => storesById.has(item.store_id))
+  const missingLocationCount = new Set(prices.flatMap((item) => {
+    const store = storesById.get(item.store_id)
+    return store && !hasLocation(store) ? [item.store_id] : []
+  })).size
   const pins = prices.flatMap((item) => {
     const store = storesById.get(item.store_id)
-    if (!store || store.lat === null || store.lng === null) return []
+    if (!store || !hasLocation(store)) return []
     return [{ ...store, lat: store.lat, lng: store.lng, price: Number(item.price) }]
   })
-  return { prices, pins }
+  return { prices, pins, missingLocationCount }
 }
 
 function pinIcon(pin: MapPin, cheapest: boolean) {
@@ -88,7 +97,9 @@ export function MapExperience({ productId, onOpenStore }: {
   const mapRef = useRef<L.Map | null>(null)
   const [pins, setPins] = useState<MapPin[]>([])
   const [prices, setPrices] = useState<StorePriceRow[]>([])
+  const [missingLocationCount, setMissingLocationCount] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(false)
   const [selectedPin, setSelectedPin] = useState<MapPin | null>(null)
   const [offline, setOffline] = useState(!navigator.onLine)
@@ -114,22 +125,28 @@ export function MapExperience({ productId, onOpenStore }: {
     if (cached) {
       setPins(cached.data.pins)
       setPrices(cached.data.prices)
-      setFetchedAt(cached.fetchedAt)
+      setMissingLocationCount(cached.data.missingLocationCount ?? 0)
+      setFetchedAt(null)
       setLoading(false)
       setError(false)
     } else {
       setLoading(true)
       setPins([])
       setPrices([])
+      setMissingLocationCount(0)
     }
     if (!supabase) {
       setError(!cached)
       setLoading(false)
+      setRefreshing(false)
       return
     }
     const client = supabase
     let active = true
+    const startedAt = Date.now()
     setSelectedPin(null)
+    setFetchedAt(null)
+    setRefreshing(true)
 
     const loadPins = async (): Promise<MapData> => {
       if (productId) {
@@ -141,14 +158,12 @@ export function MapExperience({ productId, onOpenStore }: {
         if (requestError) throw requestError
         const listings = (data ?? []) as StorePriceRow[]
         const storeIds = [...new Set(listings.map((item) => item.store_id))]
-        if (storeIds.length === 0) return { prices: [], pins: [] }
+        if (storeIds.length === 0) return { prices: [], pins: [], missingLocationCount: 0 }
         const { data: storeData, error: storeError } = await client
           .from('stores')
           .select('id, name, city, address, lat, lng, logo_path, serial_no')
           .in('id', storeIds)
           .eq('status', 'approved')
-          .not('lat', 'is', null)
-          .not('lng', 'is', null)
         if (storeError) throw storeError
         return mapProductPrices(listings, (storeData ?? []) as StoreMapRecord[])
       }
@@ -158,14 +173,13 @@ export function MapExperience({ productId, onOpenStore }: {
           .from('stores')
           .select('id, name, city, address, lat, lng, logo_path, serial_no')
           .eq('status', 'approved')
-          .not('lat', 'is', null)
-          .not('lng', 'is', null)
         if (requestError) throw requestError
         const storeRows = (data ?? []) as StoreMapRecord[]
+        const missingLocationCount = storeRows.filter((store) => !hasLocation(store)).length
         const pins = storeRows
-          .filter((store): store is StoreMapRecord & { lat: number; lng: number } => store.lat !== null && store.lng !== null)
+          .filter(hasLocation)
           .map((store) => ({ ...store, lat: store.lat, lng: store.lng }))
-        return { prices: [], pins }
+        return { prices: [], pins, missingLocationCount }
       }
     }
     void withRequestTimeout(loadPins).then((data) => {
@@ -173,13 +187,17 @@ export function MapExperience({ productId, onOpenStore }: {
       writePublicCache(cacheKey, data)
       setPins(data.pins)
       setPrices(data.prices)
+      setMissingLocationCount(data.missingLocationCount)
       setFetchedAt(null)
       setError(false)
       setLoading(false)
+      setRefreshing(false)
     }).catch(() => {
       if (!active) return
+      setFetchedAt(cached && Date.now() - startedAt <= 3000 ? cached.fetchedAt : null)
       setError(!cached)
       setLoading(false)
+      setRefreshing(false)
     })
     return () => { active = false }
   }, [productId])
@@ -230,7 +248,7 @@ export function MapExperience({ productId, onOpenStore }: {
       maxClusterRadius: 48,
     })
     for (const pin of pins) {
-      if (pin.lat === null || pin.lng === null) continue
+      if (!Number.isFinite(pin.lat) || !Number.isFinite(pin.lng)) continue
       const marker = L.marker([pin.lat, pin.lng], {
         icon: pinIcon(pin, pin.price !== undefined && pin.price === cheapestPrice),
         title: pin.name,
@@ -262,10 +280,13 @@ export function MapExperience({ productId, onOpenStore }: {
   return (
     <section className="mt-5 space-y-3">
       {(offline || tilesFailed) && <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{tk.buyer.mapOffline}</p>}
-      <OfflineDataNotice fetchedAt={fetchedAt} />
+      <OfflineDataNotice fetchedAt={fetchedAt} refreshing={refreshing} />
       <div ref={mapElementRef} className="store-main-map h-[55vh] min-h-80 max-h-[560px] w-full overflow-hidden rounded-md border border-stone-300" />
       {loading && <p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p>}
       {error && <p role="alert" className="text-sm text-red-700">{tk.buyer.mapLoadError}</p>}
+      {!loading && !error && missingLocationCount > 0 && (
+        <p role="status" className="text-sm text-stone-500">{tk.buyer.locationMissing(missingLocationCount)}</p>
+      )}
       {!loading && !error && pins.length === 0 && <p className="text-sm text-stone-500">{tk.buyer.mapNoStores}</p>}
       {selectedPin && (
         <article className="space-y-3 rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
@@ -283,7 +304,7 @@ export function MapExperience({ productId, onOpenStore }: {
             <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600">
               <span>{tk.buyer.updated}: {relativeTime(selectedPrice.updated_at)}</span>
               {Date.now() - new Date(selectedPrice.updated_at).getTime() > 86400000 && <span className="font-semibold">{tk.buyer.oldData}</span>}
-              {selectedPrice.photo_paths[0] && supabase && (
+              {selectedPrice.photo_paths?.[0] && supabase && (
                 <img
                   src={supabase.storage.from('product-photos').getPublicUrl(thumbnailPathFor(selectedPrice.photo_paths[0])).data.publicUrl}
                   alt={tk.buyer.productPhoto}
@@ -314,6 +335,7 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
 }) {
   const [listings, setListings] = useState<StorePriceRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
 
@@ -322,7 +344,7 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
     const cached = readPublicCache<StorePriceRow[]>(cacheKey)
     if (cached) {
       setListings(cached.data)
-      setFetchedAt(cached.fetchedAt)
+      setFetchedAt(null)
       setLoading(false)
       setError(false)
     } else {
@@ -331,10 +353,14 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
     if (!supabase) {
       setError(!cached)
       setLoading(false)
+      setRefreshing(false)
       return
     }
     const client = supabase
     let active = true
+    const startedAt = Date.now()
+    setFetchedAt(null)
+    setRefreshing(true)
     void withRequestTimeout(async () => {
       const { data, error: requestError } = await client
         .from('price_list')
@@ -355,10 +381,13 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
         setListings(data)
         setFetchedAt(null)
         setLoading(false)
-      }).catch(() => {
-        if (!active) return
-        setError(!cached)
-        setLoading(false)
+        setRefreshing(false)
+        }).catch(() => {
+          if (!active) return
+          setFetchedAt(cached && Date.now() - startedAt <= 3000 ? cached.fetchedAt : null)
+          setError(!cached)
+          setLoading(false)
+          setRefreshing(false)
       })
     return () => { active = false }
   }, [store.id])
@@ -380,7 +409,7 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
           <p className="text-sm text-stone-700">{store.address}</p>
         </div>
       </div>
-      <OfflineDataNotice fetchedAt={fetchedAt} />
+      <OfflineDataNotice fetchedAt={fetchedAt} refreshing={refreshing} />
       {loading ? <p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p> : error ? (
         <p role="alert" className="text-sm text-red-700">{tk.buyer.loadError}</p>
       ) : listings.length === 0 ? (

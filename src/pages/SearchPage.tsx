@@ -16,6 +16,7 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
 }) {
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(false)
+  const [productsRefreshing, setProductsRefreshing] = useState(false)
   const [productsError, setProductsError] = useState(false)
   const [productsFetchedAt, setProductsFetchedAt] = useState<number | null>(null)
 
@@ -25,6 +26,7 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
       setProductsError(false)
       setProductsLoading(false)
       setProductsFetchedAt(null)
+      setProductsRefreshing(false)
       return
     }
     const normalizedTerm = searchTerm.trim().toLocaleLowerCase()
@@ -32,7 +34,7 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
     const cached = readPublicCache<Product[]>(cacheKey)
     if (cached) {
       setProducts(cached.data)
-      setProductsFetchedAt(cached.fetchedAt)
+      setProductsFetchedAt(null)
       setProductsLoading(false)
       setProductsError(false)
     } else {
@@ -41,11 +43,15 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
     if (!supabase) {
       setProductsError(!cached)
       setProductsLoading(false)
+      setProductsRefreshing(false)
       return
     }
 
     const client = supabase
     let mounted = true
+    const startedAt = Date.now()
+    setProductsFetchedAt(null)
+    setProductsRefreshing(true)
     setProductsError(false)
     void withRequestTimeout(async () => {
       const { data, error: requestError } = await client
@@ -63,10 +69,13 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
         setProductsFetchedAt(null)
         setProductsError(false)
         setProductsLoading(false)
+        setProductsRefreshing(false)
       }).catch(() => {
         if (!mounted) return
+        setProductsFetchedAt(cached && Date.now() - startedAt <= 3000 ? cached.fetchedAt : null)
         setProductsError(!cached)
         setProductsLoading(false)
+        setProductsRefreshing(false)
       })
 
     return () => { mounted = false }
@@ -89,7 +98,7 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
         <p className="mt-8 text-center text-sm text-stone-500">{tk.buyer.searchPrompt}</p>
       ) : (
         <>
-          <OfflineDataNotice fetchedAt={productsFetchedAt} />
+          <OfflineDataNotice fetchedAt={productsFetchedAt} refreshing={productsRefreshing} active={active && visible} />
           {productsLoading && products.length === 0 ? <PageSkeleton /> : productsError ? (
             <p role="alert" className="mt-8 text-sm text-red-700">{tk.buyer.loadError}</p>
           ) : products.length === 0 ? (

@@ -16,6 +16,7 @@ export function BasketPage({ basket, onBasketChange }: {
 }) {
   const [products, setProducts] = useState<BasketProduct[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const basketIds = basket.map((item) => item.productId).sort().join(',')
@@ -26,6 +27,7 @@ export function BasketPage({ basket, onBasketChange }: {
       setLoading(false)
       setError(false)
       setFetchedAt(null)
+      setRefreshing(false)
       return
     }
     const ids = basketIds.split(',')
@@ -88,7 +90,7 @@ export function BasketPage({ basket, onBasketChange }: {
     }
     if (cachedData) {
       setProducts(cachedData)
-      setFetchedAt(cacheFetchedAt)
+      setFetchedAt(null)
       setLoading(false)
       setError(false)
     } else {
@@ -97,11 +99,15 @@ export function BasketPage({ basket, onBasketChange }: {
     if (!supabase) {
       setError(!cachedData)
       setLoading(false)
+      setRefreshing(false)
       return
     }
 
     const client = supabase
     let active = true
+    const startedAt = Date.now()
+    setFetchedAt(null)
+    setRefreshing(true)
     const loadBasketProducts = async () => {
       try {
         const [productResult, priceResult] = await withRequestTimeout(() => Promise.all([
@@ -129,10 +135,13 @@ export function BasketPage({ basket, onBasketChange }: {
         setFetchedAt(null)
         setError(false)
         setLoading(false)
+        setRefreshing(false)
       } catch {
         if (!active) return
+        setFetchedAt(cachedData && cacheFetchedAt !== null && Date.now() - startedAt <= 3000 ? cacheFetchedAt : null)
         setError(!cachedData)
         setLoading(false)
+        setRefreshing(false)
       }
     }
     void loadBasketProducts()
@@ -181,7 +190,7 @@ export function BasketPage({ basket, onBasketChange }: {
 
   return (
     <section className="mt-5 space-y-6">
-      <OfflineDataNotice fetchedAt={fetchedAt} />
+      <OfflineDataNotice fetchedAt={fetchedAt} refreshing={refreshing} />
       <div className="flex justify-end">
         <button type="button" onClick={() => onBasketChange([])} className="min-h-11 text-sm font-semibold text-red-700">{tk.basket.clear}</button>
       </div>

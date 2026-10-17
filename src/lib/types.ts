@@ -18,9 +18,7 @@ export type PriceListing = {
 export type StoreStatus = 'pending' | 'approved' | 'suspended'
 export type StoreRecord = {
   id: string
-  owner_id: string
   name: string
-  phone: string
   city: string | null
   address: string
   lat: number | null

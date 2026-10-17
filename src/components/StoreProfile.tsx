@@ -56,7 +56,7 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
       </div>
       <form onSubmit={onSubmit} className="space-y-4">
         {textInput('name', tk.stores.name, true)}
-        {textInput('phone', tk.stores.phone, true)}
+        {textInput('phone', tk.stores.phone, !store)}
         {textInput('city', tk.stores.city)}
         {textInput('address', tk.stores.address, true)}
         <div className="space-y-2">
@@ -230,7 +230,6 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
           <article key={item.id} className="space-y-3 border-b border-stone-200 py-4">
             {photoUrls[item.id] && <img src={photoUrls[item.id]} alt={tk.stores.photo} className="h-44 w-full rounded-md object-cover" />}
             <h4 className="font-semibold text-stone-900">{item.name}</h4>
-            <p className="text-sm text-stone-700">{item.phone}</p>
             <p className="text-sm text-stone-700">{item.city || ''}{item.city ? ', ' : ''}{item.address}</p>
             {item.lat === null || item.lng === null
               ? <p className="text-sm font-medium text-amber-800">{tk.stores.locationMissingWarning}</p>
@@ -407,10 +406,10 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
     }
     const client = supabase
     setLoading(true)
-    const request = client.from('stores').select('id, owner_id, name, phone, city, address, lat, lng, photo_path, logo_path, serial_no, status')
+    const selectFields = 'id, name, city, address, lat, lng, photo_path, logo_path, serial_no, status'
     const { data, error: requestError } = role === 'admin'
-      ? await request.order('created_at', { ascending: false })
-      : await request.eq('owner_id', userId).maybeSingle()
+      ? await client.from('stores').select(selectFields).order('created_at', { ascending: false })
+      : await client.from('stores').select(selectFields).eq('owner_id', userId).maybeSingle()
 
     if (requestError) {
       setError(tk.stores.loadError)
@@ -419,12 +418,25 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
     }
 
     const storeRows = (role === 'admin' ? data ?? [] : data ? [data] : []) as StoreRecord[]
-    const ownStore = storeRows.find((item) => item.owner_id === userId) ?? null
+    let ownStore = role === 'admin' ? null : storeRows[0] ?? null
+    if (role === 'admin') {
+      const { data: ownStoreData, error: ownStoreError } = await client
+        .from('stores')
+        .select(selectFields)
+        .eq('owner_id', userId)
+        .maybeSingle()
+      if (ownStoreError) {
+        setError(tk.stores.loadError)
+        setLoading(false)
+        return
+      }
+      ownStore = ownStoreData as StoreRecord | null
+    }
     setStores(storeRows)
     setStore(ownStore)
     setFields(ownStore ? {
       name: ownStore.name,
-      phone: ownStore.phone,
+      phone: '',
       city: ownStore.city ?? '',
       address: ownStore.address,
       lat: ownStore.lat,
@@ -514,14 +526,21 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
         if (uploadError) throw uploadError
       }
 
-      const storeFields = {
+      const { phone, ...storeFields } = {
         ...fields,
         city: fields.city.trim() || null,
         photo_path: photoPath,
       }
       const result = store
-        ? await supabase.from('stores').update(storeFields).eq('id', store.id).select('id').single()
-        : await supabase.from('stores').insert({ owner_id: userId, ...storeFields }).select('id').single()
+        ? await supabase.from('stores').update({
+            ...storeFields,
+            ...(phone.trim() ? { phone: phone.trim() } : {}),
+          }).eq('id', store.id).select('id').single()
+        : await supabase.from('stores').insert({
+            owner_id: userId,
+            ...storeFields,
+            phone: phone.trim(),
+          }).select('id').single()
 
       if (result.error) throw result.error
       storeSaved = true
