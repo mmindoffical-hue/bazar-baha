@@ -1,10 +1,9 @@
-import { Home, Map, Search, ShoppingBasket, UserRound } from 'lucide-react'
+import { Map, Search, ShoppingBasket, UserRound } from 'lucide-react'
 import { tk, type PageKey } from '../i18n/tk'
 
-const navigation: { key: PageKey; icon: typeof Home }[] = [
-  { key: 'home', icon: Home },
-  { key: 'search', icon: Search },
+const navigation: { key: PageKey; icon: typeof Map }[] = [
   { key: 'map', icon: Map },
+  { key: 'search', icon: Search },
   { key: 'basket', icon: ShoppingBasket },
   { key: 'profile', icon: UserRound },
 ]
@@ -16,7 +15,7 @@ export function BottomNavigation({ activePage, onNavigate }: {
   return (
     <nav
       aria-label={tk.navigationLabel}
-      className="fixed inset-x-0 bottom-0 z-10 mx-auto grid max-w-xl grid-cols-5 border-t border-stone-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-10 mx-auto grid max-w-xl grid-cols-4 border-t border-stone-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
     >
       {navigation.map(({ key, icon: Icon }) => {
         const isActive = activePage === key

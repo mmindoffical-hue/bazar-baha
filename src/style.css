@@ -16,7 +16,7 @@
 
 body {
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
 }
 
@@ -51,11 +51,24 @@ button {
 .store-map-logo {
   width: 40px;
   height: 40px;
-  border: 3px solid #fff;
+  border: 1px solid #fff;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 5px rgb(0 0 0 / 28%);
   object-fit: cover;
+}
+
+.store-map-new-badge {
+  position: absolute;
+  top: -2px;
+  right: -14px;
+  padding: 2px 4px;
+  border: 1px solid #fff;
+  border-radius: 999px;
+  background: #b45309;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .store-map-name {
@@ -75,7 +88,6 @@ button {
 
 .store-map-marker-cheapest .store-map-logo {
   border-color: #059669;
-  box-shadow: 0 0 0 2px #059669, 0 1px 5px rgb(0 0 0 / 28%);
 }
 
 .store-map-marker-cheapest .store-map-name {
@@ -100,4 +112,249 @@ button {
 
 .store-map-marker-cheapest .store-map-price {
   background: #047857;
+}
+
+.map-page {
+  position: fixed;
+  inset: 0 0 calc(4rem + env(safe-area-inset-bottom));
+  overflow: hidden;
+  background-color: #e7e9e5;
+  background-image: linear-gradient(135deg, transparent 48%, rgb(255 255 255 / 25%) 49%, rgb(255 255 255 / 25%) 51%, transparent 52%);
+  background-size: 32px 32px;
+  touch-action: none;
+}
+
+.map-load-skeleton {
+  position: absolute;
+  inset: 0;
+  background: inherit;
+}
+
+.map-experience {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #e7e9e5;
+  touch-action: none;
+}
+
+.store-main-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #e7e9e5;
+  background-image: linear-gradient(135deg, transparent 48%, rgb(255 255 255 / 25%) 49%, rgb(255 255 255 / 25%) 51%, transparent 52%);
+  background-size: 32px 32px;
+  touch-action: none;
+}
+
+.map-top-controls {
+  position: absolute;
+  z-index: 500;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  left: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.map-search-button,
+.map-location-button {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(214 211 209 / 85%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 94%);
+  color: #1c1917;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
+.map-search-button {
+  flex: 1;
+  justify-content: flex-start;
+  padding: 0 16px;
+  color: #57534e;
+}
+
+.map-location-button {
+  flex: 0 0 auto;
+  padding: 0 13px;
+  color: #065f46;
+}
+
+.map-location-button:disabled {
+  opacity: 0.7;
+}
+
+.map-status {
+  position: absolute;
+  z-index: 500;
+  top: 72px;
+  right: 12px;
+  left: 12px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgb(255 251 235 / 94%);
+  color: #78350f;
+  font-size: 13px;
+}
+
+.map-error {
+  top: 112px;
+  background: rgb(254 242 242 / 95%);
+  color: #b91c1c;
+}
+
+.map-experience .leaflet-bottom {
+  bottom: 62px;
+}
+
+.map-experience.map-news-open .leaflet-bottom {
+  bottom: min(42dvh, 400px);
+}
+
+.leaflet-control-attribution {
+  border-radius: 4px;
+  background: rgb(255 255 255 / 72%) !important;
+  color: #44403c !important;
+  font-size: 10px !important;
+}
+
+.leaflet-control-attribution a {
+  color: #44403c !important;
+}
+
+.map-store-card {
+  position: absolute;
+  z-index: 600;
+  right: 12px;
+  bottom: 66px;
+  left: 12px;
+  max-height: 38dvh;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid #e7e5e4;
+  border-radius: 16px;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 14%);
+}
+
+.map-store-card-above-news {
+  bottom: calc(min(42dvh, 400px) + 10px);
+}
+
+.map-news-panel {
+  position: absolute;
+  z-index: 650;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 56px;
+  overflow: hidden;
+  border-top: 1px solid #e7e5e4;
+  border-radius: 16px 16px 0 0;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 -2px 12px rgb(0 0 0 / 10%);
+  touch-action: pan-y;
+}
+
+.map-news-panel-expanded {
+  height: min(42dvh, 400px);
+}
+
+.map-news-heading {
+  display: flex;
+  width: 100%;
+  height: 55px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  color: #1c1917;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.map-news-content {
+  height: calc(100% - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.map-news-subtitle {
+  padding: 10px 16px 4px;
+  color: #065f46;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.map-news-empty {
+  padding: 6px 16px 10px;
+  color: #78716c;
+  font-size: 13px;
+}
+
+.map-news-row {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f5f5f4;
+  text-align: left;
+}
+
+.map-news-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  color: #292524;
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+
+.map-news-time {
+  flex: 0 0 auto;
+  color: #78716c;
+  font-size: 11px;
+}
+
+.map-news-badge {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.map-news-price-row {
+  align-items: flex-start;
+}
+
+.map-store-page {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 64px 20px 24px;
+  background: #fff;
+  touch-action: pan-y;
+}
+
+.map-location-count {
+  top: 152px;
 }

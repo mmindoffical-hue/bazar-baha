@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, LocateFixed, Search } from 'lucide-react'
 import { tk } from '../i18n/tk'
 import { relativeTime } from '../lib/formatting'
 import type { BasketItem } from '../lib/basket'
 import { supabase } from '../lib/supabase'
-import type { StoreMapRecord } from '../lib/types'
+import type { Product, StoreMapRecord } from '../lib/types'
 import { thumbnailPathFor } from '../lib/productPhotos'
 import { OfflineDataNotice } from './OfflineDataNotice'
 import { cacheProducts, readPublicCache, withRequestTimeout, writePublicCache } from '../lib/publicCache'
@@ -29,6 +30,8 @@ type StorePriceRow = {
   unit: string
 }
 type MapData = { pins: MapPin[]; prices: StorePriceRow[]; missingLocationCount: number }
+type NewsPrice = Pick<StorePriceRow, 'price_id' | 'store_id' | 'price' | 'photo_paths' | 'updated_at' | 'store_name' | 'product_id' | 'product_name' | 'unit'>
+type MapNews = { newStores: StoreMapRecord[]; latestPrices: NewsPrice[] }
 
 function hasLocation(store: StoreMapRecord): store is StoreMapRecord & { lat: number; lng: number } {
   return typeof store.lat === 'number' && Number.isFinite(store.lat)
@@ -70,6 +73,14 @@ function pinIcon(pin: MapPin, cheapest: boolean) {
     root.append(name)
   }
 
+  const approvalAge = pin.approved_at ? Date.now() - new Date(pin.approved_at).getTime() : Number.POSITIVE_INFINITY
+  if (approvalAge >= 0 && approvalAge <= 7 * 24 * 60 * 60 * 1000) {
+    const badge = document.createElement('span')
+    badge.textContent = tk.buyer.newBadge
+    badge.className = 'store-map-new-badge'
+    root.append(badge)
+  }
+
   if (pin.price !== undefined) {
     const price = document.createElement('span')
     price.textContent = `${Number(pin.price).toFixed(2)} ${tk.buyer.currency}`
@@ -89,9 +100,11 @@ function getDirectionsUrl(pin: MapPin) {
   return `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}`
 }
 
-export function MapExperience({ productId, onOpenStore }: {
+export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProduct }: {
   productId: string | null
   onOpenStore: (store: StoreMapRecord) => void
+  onOpenSearch: () => void
+  onOpenProduct: (product: Product) => void
 }) {
   const mapElementRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -105,6 +118,62 @@ export function MapExperience({ productId, onOpenStore }: {
   const [offline, setOffline] = useState(!navigator.onLine)
   const [tilesFailed, setTilesFailed] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  const [news, setNews] = useState<MapNews>({ newStores: [], latestPrices: [] })
+  const [newsLoading, setNewsLoading] = useState(true)
+  const [newsError, setNewsError] = useState(false)
+  const [newsExpanded, setNewsExpanded] = useState(false)
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [locationError, setLocationError] = useState(false)
+  const [focusedNewsPrice, setFocusedNewsPrice] = useState<NewsPrice | null>(null)
+
+  useEffect(() => {
+    const cacheKey = 'map:news'
+    const cached = readPublicCache<MapNews>(cacheKey)
+    if (cached) {
+      setNews(cached.data)
+      setNewsLoading(false)
+      setNewsError(false)
+    }
+    if (!supabase) {
+      setNewsLoading(false)
+      setNewsError(!cached)
+      return
+    }
+    const client = supabase
+    let active = true
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    void withRequestTimeout(async () => {
+      const [storesResult, pricesResult] = await Promise.all([
+        client.from('stores')
+          .select('id, name, city, address, lat, lng, logo_path, serial_no, approved_at')
+          .eq('status', 'approved')
+          .gte('approved_at', since)
+          .order('approved_at', { ascending: false }),
+        client.from('price_list')
+          .select('price_id, store_id, price, photo_paths, updated_at, store_name, product_id, product_name, unit')
+          .order('updated_at', { ascending: false })
+          .limit(10),
+      ])
+      if (storesResult.error) throw storesResult.error
+      if (pricesResult.error) throw pricesResult.error
+      return {
+        newStores: (storesResult.data ?? []) as StoreMapRecord[],
+        latestPrices: (pricesResult.data ?? []) as NewsPrice[],
+      }
+    }).then((data) => {
+      if (!active) return
+      writePublicCache(cacheKey, data)
+      setNews(data)
+      setNewsLoading(false)
+      setNewsError(false)
+    }).catch((error: unknown) => {
+      console.error('Map news could not be loaded.', error)
+      if (!active) return
+      setNewsLoading(false)
+      setNewsError(!cached)
+    })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     const cacheKey = productId ? `price-list:map-product:${productId}` : 'stores:map'
@@ -161,7 +230,7 @@ export function MapExperience({ productId, onOpenStore }: {
         if (storeIds.length === 0) return { prices: [], pins: [], missingLocationCount: 0 }
         const { data: storeData, error: storeError } = await client
           .from('stores')
-          .select('id, name, city, address, lat, lng, logo_path, serial_no')
+          .select('id, name, city, address, lat, lng, logo_path, serial_no, approved_at')
           .in('id', storeIds)
           .eq('status', 'approved')
         if (storeError) throw storeError
@@ -171,7 +240,7 @@ export function MapExperience({ productId, onOpenStore }: {
       {
         const { data, error: requestError } = await client
           .from('stores')
-          .select('id, name, city, address, lat, lng, logo_path, serial_no')
+          .select('id, name, city, address, lat, lng, logo_path, serial_no, approved_at')
           .eq('status', 'approved')
         if (requestError) throw requestError
         const storeRows = (data ?? []) as StoreMapRecord[]
@@ -205,12 +274,21 @@ export function MapExperience({ productId, onOpenStore }: {
   useEffect(() => {
     const element = mapElementRef.current
     if (!element) return
-    const map = L.map(element, { zoomControl: false }).setView([37.95, 58.38], 12)
+    const map = L.map(element, {
+      zoomControl: false,
+      markerZoomAnimation: false,
+      fadeAnimation: false,
+      attributionControl: false,
+    }).setView([37.95, 58.38], 12)
     L.control.zoom({ zoomInTitle: tk.buyer.zoomIn, zoomOutTitle: tk.buyer.zoomOut }).addTo(map)
+    L.control.attribution({ prefix: false }).addTo(map)
     mapRef.current = map
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      attribution: tk.buyer.osmAttribution,
+      updateWhenIdle: true,
+      keepBuffer: 1,
+      updateWhenZooming: false,
     }).addTo(map)
     tiles.on('tileerror', () => setTilesFailed(true))
     const handleOnline = () => {
@@ -238,6 +316,20 @@ export function MapExperience({ productId, onOpenStore }: {
     return value === null ? pin.price : Math.min(value, pin.price)
   }, null), [pins])
 
+  const markers = useMemo(() => pins.flatMap((pin) => {
+    if (!Number.isFinite(pin.lat) || !Number.isFinite(pin.lng)) return []
+    const marker = L.marker([pin.lat, pin.lng], {
+      icon: pinIcon(pin, pin.price !== undefined && pin.price === cheapestPrice),
+      title: pin.name,
+    })
+    marker.on('click', () => {
+      setFocusedNewsPrice(null)
+      setSelectedPin(pin)
+      mapRef.current?.panTo([pin.lat, pin.lng])
+    })
+    return [marker]
+  }), [pins, cheapestPrice])
+
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -247,21 +339,10 @@ export function MapExperience({ productId, onOpenStore }: {
       chunkDelay: 50,
       maxClusterRadius: 48,
     })
-    for (const pin of pins) {
-      if (!Number.isFinite(pin.lat) || !Number.isFinite(pin.lng)) continue
-      const marker = L.marker([pin.lat, pin.lng], {
-        icon: pinIcon(pin, pin.price !== undefined && pin.price === cheapestPrice),
-        title: pin.name,
-      })
-      marker.on('click', () => {
-        setSelectedPin(pin)
-        map.panTo([pin.lat, pin.lng])
-      })
-      group.addLayer(marker)
-    }
+    for (const marker of markers) group.addLayer(marker)
 
     map.addLayer(group)
-    if (pins.length > 0) {
+    if (markers.length > 0) {
       const bounds = group.getBounds()
       if (bounds.isValid()) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 15 })
     } else {
@@ -270,28 +351,88 @@ export function MapExperience({ productId, onOpenStore }: {
     return () => {
       map.removeLayer(group)
     }
-  }, [pins, cheapestPrice])
+  }, [markers])
 
-  const selectedPrice = selectedPin ? prices.find((item) => item.store_id === selectedPin.id) : undefined
+  useEffect(() => {
+    if (!focusedNewsPrice) return
+    const pin = pins.find((item) => item.id === focusedNewsPrice.store_id)
+    if (!pin) return
+    setSelectedPin(pin)
+    const map = mapRef.current
+    map?.setView([pin.lat, pin.lng], Math.max(map?.getZoom() ?? 0, 15))
+  }, [focusedNewsPrice, pins])
+
+  const selectedPrice = selectedPin
+    ? (focusedNewsPrice?.store_id === selectedPin.id ? focusedNewsPrice : prices.find((item) => item.store_id === selectedPin.id))
+    : undefined
   const selectedLogo = selectedPin?.logo_path && supabase
     ? supabase.storage.from('store-logos').getPublicUrl(selectedPin.logo_path).data.publicUrl
     : ''
 
+  const goToMyLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError(true)
+      return
+    }
+    setLocationLoading(true)
+    setLocationError(false)
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        mapRef.current?.setView([coords.latitude, coords.longitude], 15)
+        setLocationLoading(false)
+      },
+      () => {
+        setLocationLoading(false)
+        setLocationError(true)
+      },
+      { enableHighAccuracy: false, timeout: 12_000 },
+    )
+  }
+
+  const focusStore = (store: StoreMapRecord) => {
+    if (!hasLocation(store)) {
+      onOpenStore(store)
+      return
+    }
+    const pin: MapPin = { ...store, lat: store.lat, lng: store.lng }
+    setFocusedNewsPrice(null)
+    setSelectedPin(pin)
+    const map = mapRef.current
+    map?.setView([pin.lat, pin.lng], Math.max(map?.getZoom() ?? 0, 15))
+  }
+
+  const focusPrice = (price: NewsPrice) => {
+    setFocusedNewsPrice(price)
+    const pin = pins.find((item) => item.id === price.store_id)
+    if (pin) {
+      setSelectedPin(pin)
+      const map = mapRef.current
+      map?.setView([pin.lat, pin.lng], Math.max(map?.getZoom() ?? 0, 15))
+    }
+  }
+
   return (
-    <section className="mt-5 space-y-3">
-      {(offline || tilesFailed) && <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{tk.buyer.mapOffline}</p>}
-      <OfflineDataNotice fetchedAt={fetchedAt} refreshing={refreshing} />
-      <div ref={mapElementRef} className="store-main-map h-[55vh] min-h-80 max-h-[560px] w-full overflow-hidden rounded-md border border-stone-300" />
-      {loading && <p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p>}
-      {error && <p role="alert" className="text-sm text-red-700">{tk.buyer.mapLoadError}</p>}
-      {!loading && !error && missingLocationCount > 0 && (
-        <p role="status" className="text-sm text-stone-500">{tk.buyer.locationMissing(missingLocationCount)}</p>
-      )}
-      {!loading && !error && pins.length === 0 && <p className="text-sm text-stone-500">{tk.buyer.mapNoStores}</p>}
+    <section className={`map-experience${newsExpanded ? ' map-news-open' : ''}`}>
+      <div ref={mapElementRef} className="store-main-map map-loading-skeleton" />
+      <div className="map-top-controls">
+        <button type="button" onClick={onOpenSearch} className="map-search-button">
+          <Search aria-hidden="true" size={19} />
+          <span>{tk.buyer.mapSearch}</span>
+        </button>
+        <button type="button" onClick={goToMyLocation} disabled={locationLoading} className="map-location-button" aria-label={locationLoading ? tk.buyer.locationLoading : tk.buyer.myLocation}>
+          <LocateFixed aria-hidden="true" size={20} />
+          <span>{locationLoading ? tk.buyer.locationLoading : tk.buyer.myLocation}</span>
+        </button>
+      </div>
+      {(offline || tilesFailed) && <p role="status" className="map-status">{tk.buyer.mapOffline}</p>}
+      {locationError && <p role="alert" className="map-status map-error">{tk.buyer.locationError}</p>}
+      {error && <p role="alert" className="map-status map-error">{tk.buyer.mapLoadError}</p>}
+      {!loading && !error && pins.length === 0 && <p className="map-status">{tk.buyer.mapNoStores}</p>}
+      {!loading && !error && missingLocationCount > 0 && <p className="map-status map-location-count">{tk.buyer.locationMissing(missingLocationCount)}</p>}
       {selectedPin && (
-        <article className="space-y-3 rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+        <article className={`map-store-card${newsExpanded ? ' map-store-card-above-news' : ''}`}>
           <div className="flex items-center gap-3">
-            {selectedLogo && <img src={selectedLogo} alt="" loading="lazy" className="h-12 w-12 rounded-full border border-white object-cover shadow-sm" />}
+            {selectedLogo && <img src={selectedLogo} alt="" loading="lazy" decoding="async" className="h-12 w-12 rounded-full border border-stone-200 object-cover" />}
             <div className="min-w-0">
               <h2 className="font-semibold text-stone-900">{selectedPin.name}</h2>
               <p className="text-sm text-stone-600">{selectedPin.serial_no !== null ? tk.buyer.serialNo(selectedPin.serial_no) : tk.buyer.noSerialNo}</p>
@@ -322,8 +463,62 @@ export function MapExperience({ productId, onOpenStore }: {
               {tk.buyer.storeProducts}
             </button>
           </div>
+          {selectedPrice && (
+            <button
+              type="button"
+              onClick={() => onOpenProduct({ id: selectedPrice.product_id, name_tk: selectedPrice.product_name, unit: selectedPrice.unit })}
+              className="min-h-10 w-full rounded-md border border-emerald-800 px-3 text-sm font-semibold text-emerald-900"
+            >
+              {tk.buyer.openProduct}
+            </button>
+          )}
         </article>
       )}
+      <section className={`map-news-panel${newsExpanded ? ' map-news-panel-expanded' : ''}`}>
+        <button
+          type="button"
+          className="map-news-heading"
+          aria-expanded={newsExpanded}
+          onClick={() => setNewsExpanded((expanded) => !expanded)}
+        >
+          <span>{tk.buyer.newsTitle}</span>
+          {newsExpanded ? <ChevronDown aria-hidden="true" size={20} /> : <ChevronUp aria-hidden="true" size={20} />}
+        </button>
+        {newsExpanded && (
+          <div className="map-news-content">
+            <OfflineDataNotice fetchedAt={fetchedAt} refreshing={refreshing} />
+            {newsError && <p role="alert" className="px-4 py-2 text-sm text-red-700">{tk.buyer.newsUnavailable}</p>}
+            {newsLoading && news.newStores.length === 0 && news.latestPrices.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-stone-500">{tk.buyer.mapLoading}</p>
+            ) : (
+              <>
+                <h2 className="map-news-subtitle">{tk.buyer.newStore}</h2>
+                {news.newStores.length === 0 ? (
+                  <p className="map-news-empty">{tk.buyer.empty}</p>
+                ) : news.newStores.map((store) => (
+                  <button key={store.id} type="button" className="map-news-row" onClick={() => focusStore(store)}>
+                    <span className="map-news-badge">{tk.buyer.newBadge}</span>
+                    <span className="map-news-row-main">{store.name}</span>
+                    <span className="map-news-time">{store.approved_at ? relativeTime(store.approved_at) : ''}</span>
+                  </button>
+                ))}
+                <h2 className="map-news-subtitle">{tk.buyer.latestPrices}</h2>
+                {news.latestPrices.length === 0 ? (
+                  <p className="map-news-empty">{tk.buyer.empty}</p>
+                ) : news.latestPrices.map((price) => (
+                  <button key={price.price_id} type="button" className="map-news-row map-news-price-row" onClick={() => focusPrice(price)}>
+                    <span className="map-news-row-main">
+                      <strong>{price.store_name}</strong>
+                      <span>{price.product_name} · {Number(price.price).toFixed(2)} {tk.buyer.currency}</span>
+                    </span>
+                    <span className="map-news-time">{relativeTime(price.updated_at)}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </section>
     </section>
   )
 }

@@ -5,7 +5,6 @@ import { readBasket, writeBasket, type BasketItem } from './lib/basket'
 import type { Category, Product } from './lib/types'
 import { BottomNavigation } from './components/BottomNavigation'
 import { BasketPage } from './pages/BasketPage'
-import { HomePage } from './pages/HomePage'
 import { ProductPage } from './pages/ProductPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { SearchPage } from './pages/SearchPage'
@@ -16,7 +15,7 @@ const MapExperience = lazy(() => import('./components/MapExperience').then((modu
 const StoreProductsPage = lazy(() => import('./components/MapExperience').then((module) => ({ default: module.StoreProductsPage })))
 
 export default function App() {
-  const [activePage, setActivePage] = useState<PageKey>('home')
+  const [activePage, setActivePage] = useState<PageKey>('map')
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedStore, setSelectedStore] = useState<StoreMapRecord | null>(null)
@@ -60,52 +59,49 @@ export default function App() {
   const goBack = () => {
     if (selectedStore) setSelectedStore(null)
     else if (activePage === 'map' && mapProductId) {
-      setActivePage('home')
+      setActivePage('search')
       setMapProductId(null)
     } else if (selectedProduct) setSelectedProduct(null)
     else setSelectedCategory(null)
   }
 
-  const pageTitle = selectedStore?.name ?? selectedProduct?.name_tk ?? selectedCategory?.name_tk ?? tk.navigation[activePage]
+  const isMapPage = activePage === 'map'
+  const pageTitle = selectedStore?.name ?? selectedProduct?.name_tk ?? tk.navigation[activePage]
 
   return (
-    <div className="mx-auto min-h-dvh max-w-xl bg-white pb-24 shadow-sm">
-      <header className="border-b border-stone-100 px-5 pb-5 pt-7">
-        <p className="text-sm font-semibold tracking-wide text-emerald-800">{tk.appName}</p>
-        <h1 className="mt-5 text-2xl font-semibold text-stone-900">{pageTitle}</h1>
-        <p className="mt-1 text-sm text-stone-500">
-          {selectedStore
-            ? tk.buyer.storeProductsTitle(selectedStore.name)
-            : activePage === 'map' ? tk.pageDescriptions.map
+    <div className={`mx-auto min-h-dvh bg-white shadow-sm ${isMapPage ? '' : 'max-w-xl pb-24'}`}>
+      {!isMapPage && (
+        <header className="border-b border-stone-100 px-5 pb-5 pt-7">
+          <p className="text-sm font-semibold tracking-wide text-emerald-800">{tk.appName}</p>
+          <h1 className="mt-5 text-2xl font-semibold text-stone-900">{pageTitle}</h1>
+          <p className="mt-1 text-sm text-stone-500">
+            {selectedStore
+              ? tk.buyer.storeProductsTitle(selectedStore.name)
               : selectedProduct ? tk.buyer.price : selectedCategory ? tk.buyer.products : tk.pageDescriptions[activePage]}
-        </p>
-      </header>
+          </p>
+        </header>
+      )}
 
-      <main className="px-5 py-1">
-        {(selectedProduct || selectedCategory || selectedStore || (activePage === 'map' && mapProductId)) && (
+      <main className={isMapPage ? 'map-page' : 'px-5 py-1'}>
+        {(selectedProduct || selectedCategory || selectedStore || (isMapPage && mapProductId)) && (
           <button
             type="button"
             onClick={goBack}
-            className="mt-5 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-emerald-900"
+            className={isMapPage
+              ? 'map-back-button absolute left-3 top-3 z-[1000] inline-flex min-h-11 items-center gap-2 rounded-full bg-white/95 px-4 text-sm font-semibold text-emerald-900 shadow'
+              : 'mt-5 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-emerald-900'}
           >
             <ArrowLeft aria-hidden="true" size={18} />
             {tk.buyer.back}
           </button>
         )}
 
-        {activePage === 'home' && (
-          <HomePage
-            active
-            visible={!selectedProduct}
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
-            onSelectProduct={setSelectedProduct}
-          />
-        )}
         {activePage === 'search' && (
           <SearchPage
             active
             visible={!selectedProduct}
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
             searchTerm={searchTerm}
             onSearchChange={setSearchTerm}
             onSelectProduct={setSelectedProduct}
@@ -123,13 +119,22 @@ export default function App() {
           }}
         />}
         {activePage === 'map' && (
-          <Suspense fallback={<p className="mt-8 text-sm text-stone-500">{tk.buyer.mapLoading}</p>}>
+          <Suspense fallback={<div role="status" aria-label={tk.buyer.mapLoading} className="map-load-skeleton" />}>
             {selectedStore ? (
-              <StoreProductsPage store={selectedStore} basket={basket} onAddToBasket={addToBasket} />
+              <div className="map-store-page">
+                <StoreProductsPage store={selectedStore} basket={basket} onAddToBasket={addToBasket} />
+              </div>
             ) : (
               <MapExperience
                 productId={mapProductId}
                 onOpenStore={setSelectedStore}
+                onOpenSearch={() => openPage('search')}
+                onOpenProduct={(product) => {
+                  setSelectedProduct(product)
+                  setSelectedCategory(null)
+                  setSearchTerm(product.name_tk)
+                  setActivePage('search')
+                }}
               />
             )}
           </Suspense>

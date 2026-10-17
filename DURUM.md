@@ -1,9 +1,14 @@
 # Bazar Baha - Durum Notu
 
-Değerlendirme: 2026-10-15. Adım 10A ve Adım 11 uygulandı; `npm run build` başarılı. Vite büyük ana JavaScript chunk için uyarı verdi. Adım 11 kapsamında canlı Supabase'e SQL veya veri yazma isteği gönderilmedi. Tarayıcı açılmadı. Önceki kullanıcı tarafından düzenlenen bu not dosyasının kapsam dışı içeriği korunarak güncellendi.
+Değerlendirme: 2026-10-18. Adım 10A, Adım 11 ve “Harita ana sayfa” arayüzü uygulandı; `npm run build` başarılı. Vite ana JavaScript chunk büyüklüğü için hâlâ uyarı veriyor; Leaflet ve harita ekranı ayrı chunk'larda. Bu görevde tarayıcı açılmadı, canlı Supabase'e bağlanılmadı ve veritabanına yazılmadı.
 
 ## Bitenler
 
+- Harita açılış sayfası ve ilk alt gezinme sekmesidir; harita ekranı `React.lazy` ile ilk çizimde yüklenir, yüklenirken gri iskelet gösterilir. Ekran alt gezinme dışında tam yüksekliğe yayılır ve sayfa kaydırması kapalıdır. Harita üzerinde yüzen “Haryt ýa-da dükan gözle” we “Meniň ýerim” kontrolleri vardır.
+- Kategori gezintisi “Gözleg” sayfasının üstüne taşındı; arama ve kategori → ürün akışları korunuyor. Alt gezinme sırası Karta, Gözleg, Sebedim, Profil; “Baş sahypa” sekmesi kaldırıldı.
+- Harita “Täzelikler” paneli kapalıyken yalnız başlığı gösterir. Cache-first haber listesi son 7 günde onaylanmış dükkânları ve en son güncellenen 10 fiyatı sunar; satırlar ilgili marker'ı odaklar, dükkân/ürün detayına geçiş sağlar. Dükkân sorguları `approved_at` alanını da alır, `phone` ve `owner_id` seçmez; son 7 günlük mağazalarda marker “Täze” rozeti gösterir.
+- Harita `markerZoomAnimation: false`, `fadeAnimation: false`, karo katmanında `updateWhenIdle: true`, `keepBuffer: 1`, `updateWhenZooming: false` ile yapılandırıldı. Marker nesneleri `useMemo` ile hazırlanır; hareket sırasında React state'i güncellenmez. Başlangıç kapsamı dükkân marker'larının tümünü gösterecek şekilde `fitBounds` ile ayarlanır. Logo marker'larında ağır gölge yoktur ve görseller async decode edilir.
+- Leaflet attribution prefix kaldırıldı; OSM lisans bağlantısı küçük ve yarı saydam şekilde sağ altta kalır. “Meniň ýerim” cihaz konum iznini ister ve haritayı konuma merkezler.
 - E-posta/şifre kayıt, giriş/çıkış, oturum ve `profiles.role` okuma akışları kodda mevcut.
 - Kategori, arama, ürün fiyat listesi ve yenileme akışları mevcut. 2026-10-10 tarayıcı denemesinde arama ve kategori → ürün çalıştı; `Hyýar` için fiyat görüldü. Daha sonraki Supabase isteği `ERR_INTERNET_DISCONNECTED` verdi; bu nedenle fiyatı olan ürünün kategori yolundaki görüntüsü tekrar doğrulanmadı.
 - Dükkân başvuru/düzenleme formunda küçük Leaflet haritası, sürüklenebilir marker, cihaz konumunu kullanma ve isteğe bağlı logo yükleme mevcut. Yeni başvuruda konum zorunlu; eski konumsuz dükkânda uyarı gösterilir.
@@ -64,7 +69,7 @@ Uygulamanın kullandığı yüzey: `profiles`, `stores`, `categories`, `products
 
 1. Adım 11'in çevrimiçi/çevrimdışı geçiş ve PWA güncelleme akışını telefonda elle doğrulayın.
 2. Adım 10A'nın gerçek mağaza sahibi/admin hesaplarıyla canlı uçtan uca denemesini yapın; canlı SQL çalıştırmayın.
-3. Haritayı VPN açıkken ve mobil cihazda test edin; OSM karoları ve marker kümelenmesini yüzlerce kayıtla doğrulayın. Önceki yönetim akışlarının yetkili hesap testlerini de tamamlayın.
+3. Yeni harita ana sayfasını telefonda doğrulayın: dokunma/sürükleme, konum izni, haber paneli cache'i, yeni dükkân rozeti, fiyat satırından marker odağı, fitBounds ve OSM atfı. Önceki yönetim akışlarının yetkili hesap testlerini de tamamlayın.
 
 ## Git Notu
 

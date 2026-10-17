@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react'
 import { ChevronRight, Search } from 'lucide-react'
 import { tk } from '../i18n/tk'
 import { supabase } from '../lib/supabase'
-import type { Product } from '../lib/types'
+import type { Category, Product } from '../lib/types'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { OfflineDataNotice } from '../components/OfflineDataNotice'
 import { cacheProducts, readPublicCache, withRequestTimeout, writePublicCache } from '../lib/publicCache'
+import { HomePage } from './HomePage'
 
-export function SearchPage({ active, visible, searchTerm, onSearchChange, onSelectProduct }: {
+export function SearchPage({ active, visible, selectedCategory, onSelectCategory, searchTerm, onSearchChange, onSelectProduct }: {
   active: boolean
   visible: boolean
+  selectedCategory: Category | null
+  onSelectCategory: (category: Category) => void
   searchTerm: string
   onSearchChange: (value: string) => void
   onSelectProduct: (product: Product) => void
@@ -83,6 +86,13 @@ export function SearchPage({ active, visible, searchTerm, onSearchChange, onSele
 
   return (
     <section hidden={!visible} className="mt-6">
+      <HomePage
+        active={active}
+        visible={visible}
+        selectedCategory={selectedCategory}
+        onSelectCategory={onSelectCategory}
+        onSelectProduct={onSelectProduct}
+      />
       <label className="relative block">
         <Search aria-hidden="true" size={19} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
         <input

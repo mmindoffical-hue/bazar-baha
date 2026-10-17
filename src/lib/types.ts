@@ -28,7 +28,9 @@ export type StoreRecord = {
   serial_no: number | null
   status: StoreStatus
 }
-export type StoreMapRecord = Pick<StoreRecord, 'id' | 'name' | 'city' | 'address' | 'lat' | 'lng' | 'logo_path' | 'serial_no'>
+export type StoreMapRecord = Pick<StoreRecord, 'id' | 'name' | 'city' | 'address' | 'lat' | 'lng' | 'logo_path' | 'serial_no'> & {
+  approved_at: string | null
+}
 export type StoreFields = {
   name: string
   phone: string
