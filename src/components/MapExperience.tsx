@@ -33,14 +33,52 @@ type MapData = { pins: MapPin[]; prices: StorePriceRow[]; missingLocationCount: 
 type NewsPrice = Pick<StorePriceRow, 'price_id' | 'store_id' | 'price' | 'photo_paths' | 'updated_at' | 'store_name' | 'product_id' | 'product_name' | 'unit'>
 type MapNews = { newStores: StoreMapRecord[]; latestPrices: NewsPrice[] }
 
+function normalizeMapData(value: unknown): MapData {
+  if (Array.isArray(value)) {
+    const stores = value as StoreMapRecord[]
+    return {
+      pins: stores.filter(hasLocation).map((store) => ({ ...store, lat: store.lat, lng: store.lng })),
+      prices: [],
+      missingLocationCount: stores.filter((store) => !hasLocation(store)).length,
+    }
+  }
+  if (!value || typeof value !== 'object') {
+    return { pins: [], prices: [], missingLocationCount: 0 }
+  }
+  const data = value as Partial<MapData>
+  return {
+    pins: Array.isArray(data.pins) ? data.pins : [],
+    prices: Array.isArray(data.prices) ? data.prices : [],
+    missingLocationCount: typeof data.missingLocationCount === 'number'
+      && Number.isFinite(data.missingLocationCount)
+      ? data.missingLocationCount
+      : 0,
+  }
+}
+
+function normalizeMapNews(value: unknown): MapNews {
+  if (!value || typeof value !== 'object') return { newStores: [], latestPrices: [] }
+  const data = value as Partial<MapNews>
+  return {
+    newStores: Array.isArray(data.newStores) ? data.newStores : [],
+    latestPrices: Array.isArray(data.latestPrices) ? data.latestPrices : [],
+  }
+}
+
 function hasLocation(store: StoreMapRecord): store is StoreMapRecord & { lat: number; lng: number } {
   return typeof store.lat === 'number' && Number.isFinite(store.lat)
     && typeof store.lng === 'number' && Number.isFinite(store.lng)
 }
 
-function mapProductPrices(listings: StorePriceRow[], stores: StoreMapRecord[]): MapData {
-  const storesById = new Map(stores.map((store) => [store.id, store]))
-  const prices = listings.filter((item) => storesById.has(item.store_id))
+function mapProductPrices(listings: unknown, stores: unknown): MapData {
+  const storeRows: StoreMapRecord[] = Array.isArray(stores)
+    ? stores
+    : stores && typeof stores === 'object' && 'pins' in stores && Array.isArray(stores.pins)
+      ? stores.pins
+      : []
+  const priceRows: StorePriceRow[] = Array.isArray(listings) ? listings : []
+  const storesById = new Map(storeRows.map((store) => [store.id, store]))
+  const prices = priceRows.filter((item) => storesById.has(item.store_id))
   const missingLocationCount = new Set(prices.flatMap((item) => {
     const store = storesById.get(item.store_id)
     return store && !hasLocation(store) ? [item.store_id] : []
@@ -130,7 +168,7 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
     const cacheKey = 'map:news'
     const cached = readPublicCache<MapNews>(cacheKey)
     if (cached) {
-      setNews(cached.data)
+      setNews(normalizeMapNews(cached.data))
       setNewsLoading(false)
       setNewsError(false)
     }
@@ -157,13 +195,14 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
       if (storesResult.error) throw storesResult.error
       if (pricesResult.error) throw pricesResult.error
       return {
-        newStores: (storesResult.data ?? []) as StoreMapRecord[],
-        latestPrices: (pricesResult.data ?? []) as NewsPrice[],
+        newStores: Array.isArray(storesResult.data) ? storesResult.data as StoreMapRecord[] : [],
+        latestPrices: Array.isArray(pricesResult.data) ? pricesResult.data as NewsPrice[] : [],
       }
     }).then((data) => {
       if (!active) return
-      writePublicCache(cacheKey, data)
-      setNews(data)
+      const safeData = normalizeMapNews(data)
+      writePublicCache(cacheKey, safeData)
+      setNews(safeData)
       setNewsLoading(false)
       setNewsError(false)
     }).catch((error: unknown) => {
@@ -177,7 +216,10 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
 
   useEffect(() => {
     const cacheKey = productId ? `price-list:map-product:${productId}` : 'stores:map'
-    const cachedMap = readPublicCache<MapData>(cacheKey)
+    const cachedMapEntry = readPublicCache<unknown>(cacheKey)
+    const cachedMap = cachedMapEntry
+      ? { ...cachedMapEntry, data: normalizeMapData(cachedMapEntry.data) }
+      : null
     const cachedProductPrices = productId
       ? readPublicCache<StorePriceRow[]>(`price-list:product:${productId}`)
       : null
@@ -192,9 +234,10 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
         : null
     )
     if (cached) {
-      setPins(cached.data.pins)
-      setPrices(cached.data.prices)
-      setMissingLocationCount(cached.data.missingLocationCount ?? 0)
+      const safeData = normalizeMapData(cached.data)
+      setPins(safeData.pins)
+      setPrices(safeData.prices)
+      setMissingLocationCount(safeData.missingLocationCount)
       setFetchedAt(null)
       setLoading(false)
       setError(false)
@@ -225,7 +268,7 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
           .eq('product_id', productId)
           .order('price', { ascending: true })
         if (requestError) throw requestError
-        const listings = (data ?? []) as StorePriceRow[]
+        const listings: StorePriceRow[] = Array.isArray(data) ? data : []
         const storeIds = [...new Set(listings.map((item) => item.store_id))]
         if (storeIds.length === 0) return { prices: [], pins: [], missingLocationCount: 0 }
         const { data: storeData, error: storeError } = await client
@@ -234,7 +277,7 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
           .in('id', storeIds)
           .eq('status', 'approved')
         if (storeError) throw storeError
-        return mapProductPrices(listings, (storeData ?? []) as StoreMapRecord[])
+        return mapProductPrices(listings, storeData)
       }
 
       {
@@ -243,7 +286,7 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
           .select('id, name, city, address, lat, lng, logo_path, serial_no, approved_at')
           .eq('status', 'approved')
         if (requestError) throw requestError
-        const storeRows = (data ?? []) as StoreMapRecord[]
+        const storeRows: StoreMapRecord[] = Array.isArray(data) ? data : []
         const missingLocationCount = storeRows.filter((store) => !hasLocation(store)).length
         const pins = storeRows
           .filter(hasLocation)
@@ -253,10 +296,11 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
     }
     void withRequestTimeout(loadPins).then((data) => {
       if (!active) return
-      writePublicCache(cacheKey, data)
-      setPins(data.pins)
-      setPrices(data.prices)
-      setMissingLocationCount(data.missingLocationCount)
+      const safeData = normalizeMapData(data)
+      writePublicCache(cacheKey, safeData)
+      setPins(safeData.pins)
+      setPrices(safeData.prices)
+      setMissingLocationCount(safeData.missingLocationCount)
       setFetchedAt(null)
       setError(false)
       setLoading(false)
@@ -279,12 +323,16 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
       markerZoomAnimation: false,
       fadeAnimation: false,
       attributionControl: false,
-    }).setView([37.95, 58.38], 12)
+      maxBounds: [[34.8, 51.9], [43.2, 67.3]],
+      maxBoundsViscosity: 1.0,
+      minZoom: 6,
+      maxZoom: 17,
+    }).setView([38.5, 59.6], 6)
     L.control.zoom({ zoomInTitle: tk.buyer.zoomIn, zoomOutTitle: tk.buyer.zoomOut }).addTo(map)
     L.control.attribution({ prefix: false }).addTo(map)
     mapRef.current = map
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+      maxZoom: 17,
       attribution: tk.buyer.osmAttribution,
       updateWhenIdle: true,
       keepBuffer: 1,
@@ -346,7 +394,7 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
       const bounds = group.getBounds()
       if (bounds.isValid()) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 15 })
     } else {
-      map.setView([37.95, 58.38], 12)
+      map.setView([38.5, 59.6], 6)
     }
     return () => {
       map.removeLayer(group)
@@ -493,9 +541,9 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
             ) : (
               <>
                 <h2 className="map-news-subtitle">{tk.buyer.newStore}</h2>
-                {news.newStores.length === 0 ? (
+                {!Array.isArray(news.newStores) || news.newStores.length === 0 ? (
                   <p className="map-news-empty">{tk.buyer.empty}</p>
-                ) : news.newStores.map((store) => (
+                ) : (Array.isArray(news.newStores) ? news.newStores : []).map((store) => (
                   <button key={store.id} type="button" className="map-news-row" onClick={() => focusStore(store)}>
                     <span className="map-news-badge">{tk.buyer.newBadge}</span>
                     <span className="map-news-row-main">{store.name}</span>
@@ -503,9 +551,9 @@ export function MapExperience({ productId, onOpenStore, onOpenSearch, onOpenProd
                   </button>
                 ))}
                 <h2 className="map-news-subtitle">{tk.buyer.latestPrices}</h2>
-                {news.latestPrices.length === 0 ? (
+                {!Array.isArray(news.latestPrices) || news.latestPrices.length === 0 ? (
                   <p className="map-news-empty">{tk.buyer.empty}</p>
-                ) : news.latestPrices.map((price) => (
+                ) : (Array.isArray(news.latestPrices) ? news.latestPrices : []).map((price) => (
                   <button key={price.price_id} type="button" className="map-news-row map-news-price-row" onClick={() => focusPrice(price)}>
                     <span className="map-news-row-main">
                       <strong>{price.store_name}</strong>
@@ -538,7 +586,7 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
     const cacheKey = `price-list:store:${store.id}`
     const cached = readPublicCache<StorePriceRow[]>(cacheKey)
     if (cached) {
-      setListings(cached.data)
+      setListings(Array.isArray(cached.data) ? cached.data : [])
       setFetchedAt(null)
       setLoading(false)
       setError(false)
@@ -563,17 +611,18 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
         .eq('store_id', store.id)
         .order('product_name')
       if (requestError) throw requestError
-      return (data ?? []) as StorePriceRow[]
+      return Array.isArray(data) ? data as StorePriceRow[] : []
     }).then((data) => {
         if (!active) return
-        writePublicCache(cacheKey, data)
-      cacheProducts(data.map((listing) => ({
+        const safeData = Array.isArray(data) ? data : []
+        writePublicCache(cacheKey, safeData)
+      cacheProducts((Array.isArray(safeData) ? safeData : []).map((listing) => ({
         id: listing.product_id,
         name_tk: listing.product_name,
         unit: listing.unit,
       })))
       setError(false)
-        setListings(data)
+        setListings(safeData)
         setFetchedAt(null)
         setLoading(false)
         setRefreshing(false)
@@ -607,11 +656,11 @@ export function StoreProductsPage({ store, basket, onAddToBasket }: {
       <OfflineDataNotice fetchedAt={fetchedAt} refreshing={refreshing} />
       {loading ? <p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p> : error ? (
         <p role="alert" className="text-sm text-red-700">{tk.buyer.loadError}</p>
-      ) : listings.length === 0 ? (
+      ) : !Array.isArray(listings) || listings.length === 0 ? (
         <p className="mt-8 text-center text-sm text-stone-500">{tk.buyer.noStoreProducts}</p>
       ) : (
         <div className="divide-y divide-stone-200">
-          {listings.map((listing) => {
+          {(Array.isArray(listings) ? listings : []).map((listing) => {
             const photoPath = listing.photo_paths?.[0]
             const photoUrl = photoPath && supabase
               ? supabase.storage.from('product-photos').getPublicUrl(thumbnailPathFor(photoPath)).data.publicUrl

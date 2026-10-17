@@ -7,7 +7,7 @@ Değerlendirme: 2026-10-18. Adım 10A, Adım 11 ve “Harita ana sayfa” arayü
 - Harita açılış sayfası ve ilk alt gezinme sekmesidir; harita ekranı `React.lazy` ile ilk çizimde yüklenir, yüklenirken gri iskelet gösterilir. Ekran alt gezinme dışında tam yüksekliğe yayılır ve sayfa kaydırması kapalıdır. Harita üzerinde yüzen “Haryt ýa-da dükan gözle” we “Meniň ýerim” kontrolleri vardır.
 - Kategori gezintisi “Gözleg” sayfasının üstüne taşındı; arama ve kategori → ürün akışları korunuyor. Alt gezinme sırası Karta, Gözleg, Sebedim, Profil; “Baş sahypa” sekmesi kaldırıldı.
 - Harita “Täzelikler” paneli kapalıyken yalnız başlığı gösterir. Cache-first haber listesi son 7 günde onaylanmış dükkânları ve en son güncellenen 10 fiyatı sunar; satırlar ilgili marker'ı odaklar, dükkân/ürün detayına geçiş sağlar. Dükkân sorguları `approved_at` alanını da alır, `phone` ve `owner_id` seçmez; son 7 günlük mağazalarda marker “Täze” rozeti gösterir.
-- Harita `markerZoomAnimation: false`, `fadeAnimation: false`, karo katmanında `updateWhenIdle: true`, `keepBuffer: 1`, `updateWhenZooming: false` ile yapılandırıldı. Marker nesneleri `useMemo` ile hazırlanır; hareket sırasında React state'i güncellenmez. Başlangıç kapsamı dükkân marker'larının tümünü gösterecek şekilde `fitBounds` ile ayarlanır. Logo marker'larında ağır gölge yoktur ve görseller async decode edilir.
+- Harita `markerZoomAnimation: false`, `fadeAnimation: false`, karo katmanında `updateWhenIdle: true`, `keepBuffer: 1`, `updateWhenZooming: false` ile yapılandırıldı. Marker nesneleri `useMemo` ile hazırlanır; hareket sırasında React state'i güncellenmez. Başlangıç kapsamı dükkân marker'larının tümünü gösterecek şekilde `fitBounds` ile ayarlanır; harita Türkmenistan sınırları içinde tutulur. Logo marker'larında ağır gölge yoktur ve görseller async decode edilir.
 - Leaflet attribution prefix kaldırıldı; OSM lisans bağlantısı küçük ve yarı saydam şekilde sağ altta kalır. “Meniň ýerim” cihaz konum iznini ister ve haritayı konuma merkezler.
 - E-posta/şifre kayıt, giriş/çıkış, oturum ve `profiles.role` okuma akışları kodda mevcut.
 - Kategori, arama, ürün fiyat listesi ve yenileme akışları mevcut. 2026-10-10 tarayıcı denemesinde arama ve kategori → ürün çalıştı; `Hyýar` için fiyat görüldü. Daha sonraki Supabase isteği `ERR_INTERNET_DISCONNECTED` verdi; bu nedenle fiyatı olan ürünün kategori yolundaki görüntüsü tekrar doğrulanmadı.
@@ -24,7 +24,7 @@ Değerlendirme: 2026-10-18. Adım 10A, Adım 11 ve “Harita ana sayfa” arayü
 - Herkese açık kategoriler, kategori/arama ürünleri, ürün ve dükkân fiyat listeleri, harita dükkânları ve ürün haritası `key`/`data`/`fetchedAt` alanlarıyla `localStorage`'da cache-first yenilenir; Supabase okuma hatasında veya 10 saniyelik zaman aşımında mevcut cache gösterilir. Fiyat listesi cache'i 50 kayıtla sınırlıdır.
 - Cache'den gösterilen alıcı verisinde Türkmence çevrimdışı şeridi yalnızca arka plan yenilemesi 3 saniye içinde başarısız olursa veya `navigator.onLine` 2 saniye çevrimdışı kalırsa görünür; istek sürerken ve gizli sayfalarda gösterilmez. Başarılı yenileme şeridi kaldırır; görünürlük en az 4 saniyedir. Ürün sayfasında güncel ve stokta olan en az iki satır içindeki en düşük fiyatlar (eşitlikler dahil) yeşil çerçeve ve "Iň arzan" rozeti alır. Sepet yerel sepet öğelerini kullanır, katalog ve fiyat cache'lerinden çevrimdışı fiyat hesaplar.
 - Oturum açan kullanıcının profil rolü kullanıcı kimliğiyle `localStorage`'a kaydedilir; başlangıçta cache kullanılır ve `profiles.role` arka planda doğrulanır. Oturum/profil yönetim dışındaki özel veriler ve yazma akışları public cache'e alınmaz.
-- Service worker uygulama build dosyalarını precache eder; `product-photos` içindeki `-t.jpg` küçük kopyalarını en fazla 200, OSM karolarını en fazla 300 kayıt ve 7 gün CacheFirst ile saklar. Supabase API uçları NetworkOnly'dir. Yeni sürümde Türkmence “Täze wersiýa bar” bildirimi ve “Täzele” düğmesi çıkar.
+- Service worker uygulama build dosyalarını precache eder; `product-photos` içindeki `-t.jpg` küçük kopyalarını CacheFirst ile en fazla 200, tam boy fotoğrafları StaleWhileRevalidate ile en fazla 30, OSM karolarını CacheFirst ile en fazla 300 kayıt ve tümünü 7 gün saklar. Supabase API uçları için özel runtime rotası yoktur; eşleşmeyen istekler doğrudan ağa gider. Yeni sürümde Türkmence “Täze wersiýa bar” bildirimi ve “Täzele” düğmesi çıkar.
 
 ## Yarım Kalanlar
 
@@ -74,3 +74,9 @@ Uygulamanın kullandığı yüzey: `profiles`, `stores`, `categories`, `products
 ## Git Notu
 
 Adım 10A ve Adım 11 kapsamında uygulama, npm bağımlılıkları, yerel `schema.sql`, `PROJE.md` ve bu durum notu değiştirildi. Önceden var olan `DURUM.md` kullanıcı düzenlemeleri korunup güncel durumla birleştirildi. Adım 11 sırasında canlıda SQL çalıştırılmadı veya veri yazılmadı.
+
+## Hata Düzeltme - 2026-10-18
+
+- Harita cache kayıtları ve Supabase yanıtları dizi biçiminde doğrulanır; bozuk/eski cache veya null yanıt boş diziye dönüştürülür. İstek zaman aşımına uğrarsa gösterilmiş cache verisi korunur.
+- Workbox `urlPattern` fonksiyonları regex ile değiştirildi ve Supabase NetworkOnly rotası kaldırıldı; OSM ve ürün fotoğrafı cache sınırları/ömürleri korundu.
+- Harita `maxBounds` ile Türkmenistan'a kilitlendi (`[[34.8, 51.9], [43.2, 67.3]]`), `minZoom: 6`, `maxZoom: 17` ve `maxBoundsViscosity: 1.0` ayarlandı; marker'lar açılışta `fitBounds` ile gösterilir.
