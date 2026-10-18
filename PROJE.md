@@ -136,7 +136,11 @@ yapay zekâya yapıştır.
 
 ## Adım 5 - Dükkân başvurusu + admin onayı
 > "Dükkân başvuru formu (önce stores insert, status otomatik pending; sonra
-> store_private tablosuna telefon yaz). Foto
+> store_private satırını select ile kontrol et, varsa update({phone}), yoksa
+> insert({store_id, phone}) yap; upsert kullanma. Telefon +993 önekiyle
+> sekiz hane girilsin ve +993XXXXXXXX biçiminde saklansın. store_private
+> yazımı hata verirse başvuruyu başarılı sayma, stores kaydını tekrarlamadan
+> telefon yazımını yeniden dene. Foto
 > store-photos/{user_id}/vitrin.jpg yoluna yüklensin. Admin sayfasında
 > bekleyen başvurular listesi, foto + store_private telefonu ile, 'Onayla' ve 'Askıya al'
 > butonları set_store_status RPC'sini çağırsın."

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react'
 import { MapPin } from 'lucide-react'
 import { tk } from '../i18n/tk'
 import { prepareStoreLogo, prepareStorePhoto } from '../lib/formatting'
@@ -20,7 +20,39 @@ const emptyStoreFields: StoreFields = {
   lng: null,
 }
 
-function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, onPhotoChange, logo, onLogoChange, onLocationChange, onLocate, locating, visible, error, notice, onSubmit, saving }: {
+const phoneDigits = (value: string) => {
+  const nationalNumber = value.trim().replace(/^\+993(?:\s|-)?/, '')
+  return nationalNumber.replace(/\D/g, '').slice(0, 8)
+}
+
+const formatPhone = (value: string) => {
+  const digits = phoneDigits(value)
+  if (!digits) return '+993'
+  return `+993 ${digits.slice(0, 2)}${digits.length > 2 ? ` ${digits.slice(2)}` : ''}`
+}
+
+async function savePrivatePhone(storeId: string, phone: string) {
+  if (!supabase) throw new Error('Supabase client is unavailable')
+  const { data, error: selectError } = await supabase
+    .from('store_private')
+    .select('store_id')
+    .eq('store_id', storeId)
+    .maybeSingle()
+  if (selectError) {
+    console.error('store_private write failed', { code: selectError.code, message: selectError.message })
+    throw selectError
+  }
+
+  const result = data
+    ? await supabase.from('store_private').update({ phone }).eq('store_id', storeId)
+    : await supabase.from('store_private').insert({ store_id: storeId, phone })
+  if (result.error) {
+    console.error('store_private write failed', { code: result.error.code, message: result.error.message })
+    throw result.error
+  }
+}
+
+function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, onPhotoChange, logo, onLogoChange, onLocationChange, onLocate, locating, visible, error, notice, invalidFields, phoneOnlyRetry, onSubmit, saving }: {
   store: StoreRecord | null
   photoUrls: Record<string, string>
   fields: StoreFields
@@ -35,17 +67,60 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
   visible: boolean
   error: string
   notice: string
+  invalidFields: string[]
+  phoneOnlyRetry: boolean
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   saving: boolean
 }) {
+  const phoneInputRef = useRef<HTMLInputElement>(null)
   const textInput = (key: 'name' | 'phone' | 'city' | 'address', label: string, required = false) => (
     <label className="block space-y-2 text-sm font-medium text-stone-700">
-      <span>{label}</span>
+      <span>{label}{required ? ' *' : ''}</span>
       <input
-        required={required}
-        value={fields[key]}
-        onChange={(event) => onFieldChange(key, event.target.value)}
-        className="min-h-12 w-full rounded-md border border-stone-300 bg-white px-3 text-base text-stone-900 outline-none focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/15"
+        ref={key === 'phone' ? phoneInputRef : undefined}
+        id={`store-field-${key}`}
+        inputMode={key === 'phone' ? 'tel' : undefined}
+        autoComplete={key === 'phone' ? 'tel' : undefined}
+        disabled={phoneOnlyRetry && key !== 'phone'}
+        value={key === 'phone' ? formatPhone(fields.phone) : fields[key]}
+        onFocus={key === 'phone' ? (event) => {
+          if (event.currentTarget.selectionStart !== null && event.currentTarget.selectionStart < 4) {
+            event.currentTarget.setSelectionRange(4, 4)
+          }
+        } : undefined}
+        onClick={key === 'phone' ? (event) => {
+          if (event.currentTarget.selectionStart !== null && event.currentTarget.selectionStart < 4) {
+            event.currentTarget.setSelectionRange(4, 4)
+          }
+        } : undefined}
+        onKeyDown={key === 'phone' ? (event) => {
+          const position = event.currentTarget.selectionStart
+          if ((event.key === 'Backspace' && position !== null && position <= 4)
+            || (event.key === 'ArrowLeft' && position !== null && position <= 4)
+            || (event.key === 'Home')) {
+            event.preventDefault()
+            event.currentTarget.setSelectionRange(4, 4)
+          }
+        } : undefined}
+        onChange={(event) => {
+          if (key === 'phone') {
+            const cursorPosition = event.currentTarget.selectionStart ?? event.currentTarget.value.length
+            const inputValue = event.currentTarget.value
+            const digitsBeforeCursor = phoneDigits(inputValue.slice(0, cursorPosition)).length
+            const digits = phoneDigits(inputValue)
+            const formatted = formatPhone(digits)
+            onFieldChange(key, digits)
+            requestAnimationFrame(() => {
+              const input = phoneInputRef.current
+              if (!input) return
+              const nextPosition = digitsBeforeCursor <= 2 ? 5 + digitsBeforeCursor : 6 + digitsBeforeCursor
+              input.setSelectionRange(Math.max(4, Math.min(nextPosition, formatted.length)), Math.max(4, Math.min(nextPosition, formatted.length)))
+            })
+          } else {
+            onFieldChange(key, event.currentTarget.value)
+          }
+        }}
+        className={`min-h-12 w-full rounded-md border bg-white px-3 text-base text-stone-900 outline-none focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/15 ${invalidFields.includes(key) ? 'border-red-600 ring-2 ring-red-200' : 'border-stone-300'}`}
       />
     </label>
   )
@@ -56,25 +131,32 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
         <h2 className="text-lg font-semibold text-stone-900">{store ? store.name : tk.stores.applyTitle}</h2>
         {store && <span className="text-sm font-semibold text-emerald-900">{tk.stores.statuses[store.status]}</span>}
       </div>
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form noValidate onSubmit={onSubmit} className="space-y-4">
+        {phoneOnlyRetry && <p role="status" className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">{tk.stores.phoneRetryOnly}</p>}
+        {!store && (
+          <p role="status" className={`rounded-md border p-3 text-sm font-semibold ${fields.lat === null || fields.lng === null ? 'border-orange-400 bg-orange-50 text-orange-900' : 'border-emerald-400 bg-emerald-50 text-emerald-900'}`}>
+            {fields.lat === null || fields.lng === null ? tk.stores.locationRequired : tk.stores.locationSelected}
+          </p>
+        )}
         {textInput('name', tk.stores.name, true)}
-        {textInput('phone', tk.stores.phone, !store)}
+        {textInput('phone', tk.stores.phone, true)}
+        {phoneDigits(fields.phone).length < 8 && <p className="-mt-3 text-sm font-medium text-red-700">{tk.stores.phoneIncomplete}</p>}
         {textInput('city', tk.stores.city)}
         {textInput('address', tk.stores.address, true)}
         <div className="space-y-2">
-          <p className="text-sm font-medium text-stone-700">{tk.stores.photo}</p>
+          <p className="text-sm font-medium text-stone-700">{tk.stores.photo}{!store ? ' *' : ''}</p>
           {store && photoUrls[store.id] && !photo && (
             <img src={photoUrls[store.id]} alt={tk.stores.photo} className="h-40 w-full rounded-md object-cover" />
           )}
           {photo && <p className="text-sm text-stone-500">{photo.name}</p>}
-          <div className="grid grid-cols-2 gap-2">
+          <div id="store-field-photo" className={`grid grid-cols-2 gap-2 rounded-md ${invalidFields.includes('photo') ? 'outline outline-2 outline-red-600' : ''}`}>
             <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-stone-300 px-3 text-center text-sm font-semibold text-stone-800">
               {tk.stores.camera}
-              <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => onPhotoChange(event.target.files?.[0] ?? null)} />
+              <input type="file" accept="image/*" capture="environment" disabled={phoneOnlyRetry} className="sr-only" onChange={(event) => onPhotoChange(event.target.files?.[0] ?? null)} />
             </label>
             <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-stone-300 px-3 text-center text-sm font-semibold text-stone-800">
               {tk.stores.gallery}
-              <input type="file" accept="image/*" className="sr-only" onChange={(event) => onPhotoChange(event.target.files?.[0] ?? null)} />
+              <input type="file" accept="image/*" disabled={phoneOnlyRetry} className="sr-only" onChange={(event) => onPhotoChange(event.target.files?.[0] ?? null)} />
             </label>
           </div>
         </div>
@@ -93,6 +175,7 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
             type="file"
             accept="image/png,image/jpeg,image/webp"
             aria-label={tk.stores.logo}
+            disabled={phoneOnlyRetry}
             onChange={(event) => onLogoChange(event.target.files?.[0] ?? null)}
             className="block w-full text-sm text-stone-700 file:mr-3 file:min-h-11 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:font-semibold"
           />
@@ -103,16 +186,22 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
         <button
           type="button"
           onClick={onLocate}
-          disabled={locating}
+          disabled={locating || phoneOnlyRetry}
           className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-emerald-900 disabled:opacity-60"
         >
           <MapPin aria-hidden="true" size={18} />
           {locating ? tk.stores.locationLoading : tk.stores.location}
         </button>
-        {visible && (
-          <Suspense fallback={<p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p>}>
-            <StoreLocationPicker lat={fields.lat} lng={fields.lng} onChange={onLocationChange} />
-          </Suspense>
+        {visible && !phoneOnlyRetry && (
+          <div id="store-location" tabIndex={-1} className={`space-y-2 rounded-md ${invalidFields.includes('location') ? 'outline outline-2 outline-red-600' : ''}`}>
+            {!store && <p className={`rounded-md border p-3 text-sm font-semibold ${fields.lat === null || fields.lng === null ? 'border-orange-400 bg-orange-50 text-orange-900' : 'border-emerald-400 bg-emerald-50 text-emerald-900'}`}>
+              {fields.lat === null || fields.lng === null ? tk.stores.locationRequired : tk.stores.locationSelected}
+            </p>}
+            <p className="text-sm font-medium text-stone-700">{tk.stores.location}{!store ? ' *' : ''}</p>
+            <Suspense fallback={<p className="text-sm text-stone-500">{tk.buyer.mapLoading}</p>}>
+              <StoreLocationPicker lat={fields.lat} lng={fields.lng} onChange={onLocationChange} />
+            </Suspense>
+          </div>
         )}
         {fields.lat !== null && fields.lng !== null && (
           <p className="text-xs text-stone-500">{fields.lat.toFixed(5)}, {fields.lng.toFixed(5)}</p>
@@ -121,11 +210,13 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
         {notice && <p role="status" className="text-sm text-emerald-800">{notice}</p>}
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || phoneDigits(fields.phone).length !== 8 || (!store && (fields.lat === null || fields.lng === null))}
           className="min-h-12 w-full rounded-md bg-emerald-800 px-4 font-semibold text-white transition-colors hover:bg-emerald-900 disabled:cursor-wait disabled:opacity-60"
         >
           {saving ? tk.stores.saving : store ? tk.stores.save : tk.stores.submit}
         </button>
+        {!saving && phoneDigits(fields.phone).length !== 8 && <p className="text-sm font-medium text-red-700">{tk.stores.phoneSubmitReason}</p>}
+        {!store && (fields.lat === null || fields.lng === null) && <p className="text-sm font-medium text-orange-900">{tk.stores.locationSubmitReason}</p>}
       </form>
     </section>
   )
@@ -233,7 +324,7 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
             {photoUrls[item.id] && <img src={photoUrls[item.id]} alt={tk.stores.photo} className="h-44 w-full rounded-md object-cover" />}
             <h4 className="font-semibold text-stone-900">{item.name}</h4>
             <p className="text-sm text-stone-700">{item.city || ''}{item.city ? ', ' : ''}{item.address}</p>
-            <p className="text-sm text-stone-700">{tk.stores.phone}: {item.phone ?? ''}</p>
+            <p className="text-sm text-stone-700">{tk.stores.phone}: {item.phone || tk.stores.phoneUnavailable}</p>
             {item.lat === null || item.lng === null
               ? <p className="text-sm font-medium text-amber-800">{tk.stores.locationMissingWarning}</p>
               : item.serial_no !== null && <p className="text-sm text-stone-600">{tk.buyer.serialNo(item.serial_no)}</p>}
@@ -253,7 +344,7 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
                 <div className="min-w-0">
                   <p className="wrap-break-word font-medium text-stone-900">{item.name}</p>
                   <p className="text-sm text-stone-500">{item.serial_no !== null ? tk.buyer.serialNo(item.serial_no) : tk.buyer.noSerialNo} · {storeStatusLabel(item.status)}</p>
-                  <p className="text-sm text-stone-500">{tk.stores.phone}: {item.phone ?? ''}</p>
+                  <p className="text-sm text-stone-500">{tk.stores.phone}: {item.phone || tk.stores.phoneUnavailable}</p>
                 </div>
                 {item.status !== 'pending' && (
                   <button
@@ -401,6 +492,8 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
   const [busyStoreId, setBusyStoreId] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [invalidFields, setInvalidFields] = useState<string[]>([])
+  const [pendingPhoneStoreId, setPendingPhoneStoreId] = useState('')
 
   const loadStores = async () => {
     if (!supabase) {
@@ -457,7 +550,7 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
     setStore(ownStoreWithPhone)
     setFields(ownStoreWithPhone ? {
       name: ownStoreWithPhone.name,
-      phone: ownStoreWithPhone.phone ?? '',
+      phone: phoneDigits(ownStoreWithPhone.phone ?? ''),
       city: ownStoreWithPhone.city ?? '',
       address: ownStoreWithPhone.address,
       lat: ownStoreWithPhone.lat,
@@ -487,10 +580,17 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
 
   const updateField = (key: keyof StoreFields, value: string | number | null) => {
     setFields((previous) => ({ ...previous, [key]: value }))
+    setInvalidFields((previous) => previous.filter((field) => field !== key))
   }
 
   const updateLocation = (lat: number, lng: number) => {
     setFields((previous) => ({ ...previous, lat, lng }))
+    setInvalidFields((previous) => previous.filter((field) => field !== 'location'))
+  }
+
+  const updatePhoto = (selectedPhoto: File | null) => {
+    setPhoto(selectedPhoto)
+    if (selectedPhoto) setInvalidFields((previous) => previous.filter((field) => field !== 'photo'))
   }
 
   const locateUser = () => {
@@ -503,8 +603,7 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
     setLocating(true)
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        updateField('lat', coords.latitude)
-        updateField('lng', coords.longitude)
+        updateLocation(coords.latitude, coords.longitude)
         setNotice(tk.stores.locationSuccess)
         setLocating(false)
       },
@@ -520,12 +619,32 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
     event.preventDefault()
     setError('')
     setNotice('')
-    if (!store && (fields.lat === null || fields.lng === null)) {
-      setError(tk.stores.locationRequired)
-      return
-    }
-    if (!store && !photo) {
-      setError(tk.stores.photoRequired)
+    const missingField = !fields.name.trim()
+      ? 'name'
+      : phoneDigits(fields.phone).length !== 8
+        ? 'phone'
+        : !fields.address.trim()
+          ? 'address'
+          : !store && !photo
+            ? 'photo'
+            : !store && (fields.lat === null || fields.lng === null)
+              ? 'location'
+              : ''
+    if (missingField) {
+      setInvalidFields([missingField])
+      setError(missingField === 'phone' ? tk.stores.phoneIncomplete
+        : missingField === 'photo' ? tk.stores.photoRequired
+          : missingField === 'location' ? tk.stores.locationRequired
+            : tk.stores.requiredField)
+      requestAnimationFrame(() => {
+        const target = missingField === 'photo'
+          ? document.getElementById('store-field-photo')
+          : document.getElementById(`store-field-${missingField}`)
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        if (missingField === 'location') return
+        if (missingField === 'photo') target?.querySelector('input')?.focus()
+        else (target as HTMLInputElement | null)?.focus()
+      })
       return
     }
     if (!supabase) {
@@ -537,38 +656,54 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
     let storeSaved = false
     let logoSaveFailed = false
     try {
-      let photoPath = store?.photo_path ?? null
-      if (photo) {
-        const compressed = await prepareStorePhoto(photo)
-        photoPath = `${userId}/vitrin.jpg`
-        const { error: uploadError } = await supabase.storage
-          .from('store-photos')
-          .upload(photoPath, compressed, { contentType: 'image/jpeg', upsert: true })
-        if (uploadError) throw uploadError
-      }
+      let storeId = pendingPhoneStoreId
+      if (!storeId) {
+        let photoPath = store?.photo_path ?? null
+        if (photo) {
+          const compressed = await prepareStorePhoto(photo)
+          photoPath = `${userId}/vitrin.jpg`
+          const { error: uploadError } = await supabase.storage
+            .from('store-photos')
+            .upload(photoPath, compressed, { contentType: 'image/jpeg', upsert: true })
+          if (uploadError) throw uploadError
+        }
 
-      const { phone, ...storeFields } = {
-        ...fields,
-        city: fields.city.trim() || null,
-        photo_path: photoPath,
-      }
-      const result = store
-        ? await supabase.from('stores').update(storeFields).eq('id', store.id).select('id').single()
-        : await supabase.from('stores').insert({
+        const storeFields = {
+          name: fields.name.trim(),
+          city: fields.city.trim() || null,
+          address: fields.address.trim(),
+          lat: fields.lat,
+          lng: fields.lng,
+          photo_path: photoPath,
+        }
+        const result = store
+          ? await supabase.from('stores').update(storeFields).eq('id', store.id).select('id').single()
+          : await supabase.from('stores').insert({
             owner_id: userId,
             ...storeFields,
           }).select('id').single()
 
-      if (result.error) throw result.error
-      storeSaved = true
-      const storeId = result.data.id
-      if (phone.trim()) {
-        const { error: phoneError } = await supabase.from('store_private').upsert(
-          { store_id: storeId, phone: phone.trim() },
-          { onConflict: 'store_id' },
-        )
-        if (phoneError) throw phoneError
+        if (result.error) throw result.error
+        storeSaved = true
+        storeId = result.data.id
+        setPendingPhoneStoreId(storeId)
+      } else {
+        storeSaved = true
       }
+
+      try {
+        await savePrivatePhone(storeId, `+993${phoneDigits(fields.phone)}`)
+      } catch {
+        setInvalidFields(['phone'])
+        setError(tk.stores.phoneSaveError)
+        requestAnimationFrame(() => {
+          const input = document.getElementById('store-field-phone')
+          input?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          input?.focus()
+        })
+        return
+      }
+      setPendingPhoneStoreId('')
       if (logo) {
         logoSaveFailed = true
         const compressedLogo = await prepareStoreLogo(logo)
@@ -599,7 +734,7 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
       console.error('Store save failed', saveError)
       if (storeSaved) {
         await loadStores()
-        setFields((previous) => ({ ...previous, phone: fields.phone }))
+        setFields((previous) => ({ ...previous, phone: phoneDigits(fields.phone) }))
       }
       if (logoSaveFailed && storeSaved) {
         setError(saveError instanceof Error && saveError.message === 'size' ? tk.stores.logoSizeError : tk.stores.logoSaveError)
@@ -657,7 +792,7 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
           fields={fields}
           onFieldChange={updateField}
           photo={photo}
-          onPhotoChange={setPhoto}
+          onPhotoChange={updatePhoto}
           logo={logo}
           onLogoChange={setLogo}
           onLocationChange={updateLocation}
@@ -666,6 +801,8 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
           visible={visible}
           error={error}
           notice={notice}
+          invalidFields={invalidFields}
+          phoneOnlyRetry={Boolean(pendingPhoneStoreId)}
           onSubmit={(event) => void saveStore(event)}
           saving={saving}
         />
