@@ -9,6 +9,8 @@ import { StorePriceManager } from './StorePriceManager'
 
 const StoreLocationPicker = lazy(() => import('./StoreLocationPicker'))
 
+type StoreWithPrivatePhone = StoreRecord & { phone: string | null }
+
 const emptyStoreFields: StoreFields = {
   name: '',
   phone: '',
@@ -130,7 +132,7 @@ function StoreApplicationForm({ store, photoUrls, fields, onFieldChange, photo, 
 }
 
 function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeStatus }: {
-  stores: StoreRecord[]
+  stores: StoreWithPrivatePhone[]
   photoUrls: Record<string, string>
   busyStoreId: string
   error: string
@@ -231,6 +233,7 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
             {photoUrls[item.id] && <img src={photoUrls[item.id]} alt={tk.stores.photo} className="h-44 w-full rounded-md object-cover" />}
             <h4 className="font-semibold text-stone-900">{item.name}</h4>
             <p className="text-sm text-stone-700">{item.city || ''}{item.city ? ', ' : ''}{item.address}</p>
+            <p className="text-sm text-stone-700">{tk.stores.phone}: {item.phone ?? ''}</p>
             {item.lat === null || item.lng === null
               ? <p className="text-sm font-medium text-amber-800">{tk.stores.locationMissingWarning}</p>
               : item.serial_no !== null && <p className="text-sm text-stone-600">{tk.buyer.serialNo(item.serial_no)}</p>}
@@ -250,6 +253,7 @@ function AdminPanel({ stores, photoUrls, busyStoreId, error, notice, onChangeSta
                 <div className="min-w-0">
                   <p className="wrap-break-word font-medium text-stone-900">{item.name}</p>
                   <p className="text-sm text-stone-500">{item.serial_no !== null ? tk.buyer.serialNo(item.serial_no) : tk.buyer.noSerialNo} · {storeStatusLabel(item.status)}</p>
+                  <p className="text-sm text-stone-500">{tk.stores.phone}: {item.phone ?? ''}</p>
                 </div>
                 {item.status !== 'pending' && (
                   <button
@@ -386,7 +390,7 @@ function AdminReports({ busyStoreId, onSuspend }: { busyStoreId: string; onSuspe
 
 export function StoreProfile({ userId, role, visible }: { userId: string; role: 'user' | 'admin' | null; visible: boolean }) {
   const [store, setStore] = useState<StoreRecord | null>(null)
-  const [stores, setStores] = useState<StoreRecord[]>([])
+  const [stores, setStores] = useState<StoreWithPrivatePhone[]>([])
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [fields, setFields] = useState<StoreFields>(emptyStoreFields)
   const [photo, setPhoto] = useState<File | null>(null)
@@ -432,15 +436,32 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
       }
       ownStore = ownStoreData as StoreRecord | null
     }
-    setStores(storeRows)
-    setStore(ownStore)
-    setFields(ownStore ? {
-      name: ownStore.name,
-      phone: '',
-      city: ownStore.city ?? '',
-      address: ownStore.address,
-      lat: ownStore.lat,
-      lng: ownStore.lng,
+    const storeIds = [...new Set([...storeRows.map((item) => item.id), ...(ownStore ? [ownStore.id] : [])])]
+    const { data: privatePhoneRows, error: privatePhoneError } = storeIds.length
+      ? await client.from('store_private').select('store_id, phone').in('store_id', storeIds)
+      : { data: [], error: null }
+    if (privatePhoneError) {
+      setError(tk.stores.loadError)
+      setLoading(false)
+      return
+    }
+    const phonesByStoreId = new Map((privatePhoneRows ?? []).map((item) => [item.store_id, item.phone]))
+    const storesWithPhone: StoreWithPrivatePhone[] = storeRows.map((item) => ({
+      ...item,
+      phone: phonesByStoreId.get(item.id) ?? null,
+    }))
+    const ownStoreWithPhone = ownStore
+      ? { ...ownStore, phone: phonesByStoreId.get(ownStore.id) ?? null }
+      : null
+    setStores(storesWithPhone)
+    setStore(ownStoreWithPhone)
+    setFields(ownStoreWithPhone ? {
+      name: ownStoreWithPhone.name,
+      phone: ownStoreWithPhone.phone ?? '',
+      city: ownStoreWithPhone.city ?? '',
+      address: ownStoreWithPhone.address,
+      lat: ownStoreWithPhone.lat,
+      lng: ownStoreWithPhone.lng,
     } : emptyStoreFields)
 
     if (storeRows.length) {
@@ -532,19 +553,22 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
         photo_path: photoPath,
       }
       const result = store
-        ? await supabase.from('stores').update({
-            ...storeFields,
-            ...(phone.trim() ? { phone: phone.trim() } : {}),
-          }).eq('id', store.id).select('id').single()
+        ? await supabase.from('stores').update(storeFields).eq('id', store.id).select('id').single()
         : await supabase.from('stores').insert({
             owner_id: userId,
             ...storeFields,
-            phone: phone.trim(),
           }).select('id').single()
 
       if (result.error) throw result.error
       storeSaved = true
       const storeId = result.data.id
+      if (phone.trim()) {
+        const { error: phoneError } = await supabase.from('store_private').upsert(
+          { store_id: storeId, phone: phone.trim() },
+          { onConflict: 'store_id' },
+        )
+        if (phoneError) throw phoneError
+      }
       if (logo) {
         logoSaveFailed = true
         const compressedLogo = await prepareStoreLogo(logo)
@@ -573,6 +597,10 @@ export function StoreProfile({ userId, role, visible }: { userId: string; role: 
       await loadStores()
     } catch (saveError) {
       console.error('Store save failed', saveError)
+      if (storeSaved) {
+        await loadStores()
+        setFields((previous) => ({ ...previous, phone: fields.phone }))
+      }
       if (logoSaveFailed && storeSaved) {
         setError(saveError instanceof Error && saveError.message === 'size' ? tk.stores.logoSizeError : tk.stores.logoSaveError)
       } else {

@@ -22,7 +22,7 @@ create table public.stores (
   id          uuid primary key default gen_random_uuid(),
   owner_id    uuid not null unique references public.profiles(id) on delete cascade,
   name        text not null check (char_length(name) between 2 and 80),
-  phone       text not null,
+  phone       text,
   city        text,
   address     text not null,
   lat         double precision check (lat between -90 and 90),
@@ -33,6 +33,11 @@ create table public.stores (
   status      public.store_status not null default 'pending',
   created_at  timestamptz not null default now(),
   approved_at timestamptz
+);
+
+create table public.store_private (
+  store_id uuid primary key references public.stores(id) on delete cascade,
+  phone    text not null
 );
 
 create table public.categories (
@@ -141,7 +146,7 @@ revoke execute on function public.set_store_status(uuid, public.store_status) fr
 grant  execute on function public.set_store_status(uuid, public.store_status) to authenticated;
 
 -- 4. YETKILER (once hepsini kapat, sonra sadece gerekeni ac) -------------
-revoke all on public.profiles, public.stores, public.categories,
+revoke all on public.profiles, public.stores, public.store_private, public.categories,
               public.products, public.prices, public.reports
   from anon, authenticated;
 
@@ -150,11 +155,16 @@ grant select on public.profiles to authenticated;
 grant update (display_name) on public.profiles to authenticated;
 
 -- stores: status ve owner_id istemciden degistirilemez
-grant select on public.stores to anon, authenticated;
-grant insert (owner_id, name, phone, city, address, lat, lng, photo_path)
+grant select (id, owner_id, name, city, address, lat, lng, photo_path,
+              logo_path, serial_no, status, created_at, approved_at)
+  on public.stores to anon, authenticated;
+grant insert (owner_id, name, city, address, lat, lng, photo_path)
   on public.stores to authenticated;
-grant update (name, phone, city, address, lat, lng, photo_path, logo_path)
+grant update (name, city, address, lat, lng, photo_path, logo_path)
   on public.stores to authenticated;
+
+-- store_private: sahip telefonu okur/yazar, admin yalnizca okur
+grant select, insert, update on public.store_private to authenticated;
 
 -- katalog: herkes okur, yazmayi RLS ile sadece admin yapar
 grant select on public.categories, public.products to anon, authenticated;
@@ -176,6 +186,7 @@ grant delete on public.reports to authenticated;
 -- 5. RLS (satir duzeyinde guvenlik) --------------------------------------
 alter table public.profiles   enable row level security;
 alter table public.stores     enable row level security;
+alter table public.store_private enable row level security;
 alter table public.categories enable row level security;
 alter table public.products   enable row level security;
 alter table public.prices     enable row level security;
@@ -199,6 +210,33 @@ create policy "stores: basvuru olustur" on public.stores
 create policy "stores: kendi dukkanini guncelle" on public.stores
   for update to authenticated
   using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+
+-- store_private
+create policy "store_private: sahibi veya admin okur" on public.store_private
+  for select to authenticated
+  using (
+    public.is_admin()
+    or exists (
+      select 1 from public.stores s
+      where s.id = store_id and s.owner_id = (select auth.uid())
+    )
+  );
+create policy "store_private: sahibi ekler" on public.store_private
+  for insert to authenticated
+  with check (exists (
+    select 1 from public.stores s
+    where s.id = store_id and s.owner_id = (select auth.uid())
+  ));
+create policy "store_private: sahibi gunceller" on public.store_private
+  for update to authenticated
+  using (exists (
+    select 1 from public.stores s
+    where s.id = store_id and s.owner_id = (select auth.uid())
+  ))
+  with check (exists (
+    select 1 from public.stores s
+    where s.id = store_id and s.owner_id = (select auth.uid())
+  ));
 
 -- categories / products
 create policy "categories: herkes okur" on public.categories

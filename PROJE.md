@@ -46,10 +46,13 @@ en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
 
 ## 4. Veritabanı (özet - tam hali schema.sql)
 - `profiles` (rol: user | admin)
-- `stores` (owner_id, name, phone, city, address, lat, lng, photo_path, logo_path,
+- `stores` (owner_id, name, city, address, lat, lng, photo_path, logo_path,
   serial_no, **status: pending | approved | suspended**) - status sadece admin
   RPC'si `set_store_status` ile değişir; `serial_no` onayda sunucuda atanır ve
   istemciden yazılamaz
+- `store_private` (store_id, phone) - dükkân telefonu; yalnız dükkân sahibi
+  okuyup yazabilir, admin okuyabilir. Eski `stores.phone` sütunu nullable kalır
+  ve uygulama tarafından kullanılmaz.
 - `categories`, `products` (katalog, sadece admin yazar)
 - `prices` (store_id, product_id, price, in_stock, photo_paths, video_path, updated_at)
   - her dükkân ürün başına tek satır; `updated_at` sunucuda otomatik yazılır
@@ -62,7 +65,8 @@ en ucuz ve taze?" sorusuna baktığı bir web uygulamasıdır (PWA).
   - Logo yolu: `{store_id}/{zaman}.webp`
 
 > **Canlı veritabanı:** Adım 10A için `stores.logo_path`, `stores.serial_no`,
-> `store-logos` bucket'ı ve `price_list` alanları canlıda zaten uygulanmıştır.
+> `store-logos` bucket'ı, `price_list` alanları ve `store_private` tablosu/RLS
+> canlıda zaten uygulanmıştır.
 > Canlıya tekrar SQL çalıştırma veya canlı veritabanına bağlanma; yalnızca
 > kaynak tanımı olan `schema.sql` dosyasını güncel tut.
 
@@ -131,9 +135,10 @@ yapay zekâya yapıştır.
 > (skeleton) göster."
 
 ## Adım 5 - Dükkân başvurusu + admin onayı
-> "Dükkân başvuru formu (stores insert, status otomatik pending). Foto
+> "Dükkân başvuru formu (önce stores insert, status otomatik pending; sonra
+> store_private tablosuna telefon yaz). Foto
 > store-photos/{user_id}/vitrin.jpg yoluna yüklensin. Admin sayfasında
-> bekleyen başvurular listesi, foto + telefon ile, 'Onayla' ve 'Askıya al'
+> bekleyen başvurular listesi, foto + store_private telefonu ile, 'Onayla' ve 'Askıya al'
 > butonları set_store_status RPC'sini çağırsın."
 
 ## Adım 6 - Dükkân: fiyat girme
